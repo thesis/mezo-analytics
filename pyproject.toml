@@ -1,0 +1,32 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "mezo"
+version = "0.0.1"
+description = "Analysis of on and offchain data for Mezo, a Bitcoin-centric platform purpose-built to make Bitcoin productive in day-to-day finance"
+authors = [
+  { name = "LJ" },
+]
+
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    
+]
+requires-python = "~=3.12.0"
+
+
+[tool.ruff]
+line-length = 99
+src = ["mezo"]
+include = ["pyproject.toml", "mezo/**/*.py"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Add import sorting
+
+[tool.ruff.lint.isort]
+known-first-party = ["mezo"]
+force-sort-within-sections = true
+
