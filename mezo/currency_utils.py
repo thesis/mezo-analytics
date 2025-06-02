@@ -12,7 +12,7 @@ def format_currency_columns(df, cols, asset):
     def convert(x, token):
         if pd.isnull(x):
             return 0
-        if token == "USDC":
+        if token in {"USDC", "USDT"}:
             scale = Decimal("1e6")
         elif token in {"WBTC", "FBTC", "cbBTC", "swBTC"}:
             scale = Decimal("1e8")
