@@ -147,6 +147,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+mezo_mainnet
 
 # Spyder project settings
 .spyderproject
@@ -184,3 +185,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# VS Code
+.vscode
+
+# Raw work/archives
+mezo/archive/
+notebooks
