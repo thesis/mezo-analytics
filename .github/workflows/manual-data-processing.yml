@@ -1,0 +1,79 @@
+name: Manual Data Processing
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_to_run:
+        description: 'Select script to run'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+        - both
+        - bridge_only
+        - musd_only
+      debug_mode:
+        description: 'Enable debug output'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  manual-processing:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🌉 Process Bridge Data
+      if: github.event.inputs.script_to_run == 'both' || github.event.inputs.script_to_run == 'bridge_only'
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+      run: |
+        echo "🚀 Running bridge data processing..."
+        if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+          python -v scripts/process_bridge_data.py
+        else
+          python scripts/process_bridge_data.py
+        fi
+        
+    - name: 💰 Process MUSD Data
+      if: github.event.inputs.script_to_run == 'both' || github.event.inputs.script_to_run == 'musd_only'
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+      run: |
+        echo "🚀 Running MUSD data processing..."
+        if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+          python -v scripts/process_musd_data.py
+        else
+          python scripts/process_musd_data.py
+        fi
+        
+    - name: 📊 Upload Processing Artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: manual-processing-${{ github.event.inputs.script_to_run }}-${{ github.run_number }}
+        path: |
+          data/*.csv
+        retention-days: 7
