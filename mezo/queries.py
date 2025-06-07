@@ -1,16 +1,51 @@
 
 class MUSDQueries:
 
-  GET_TROVE_CREATED = """
-  query getMusdTxns($skip: Int!) {
-    troveCreateds(orderBy: timestamp_, orderDirection: desc, first: 1000, skip: $skip) {
-      timestamp_
-      borrower
-      transactionHash_
-      block_number
+  GET_MUSD_COLL_SNAPSHOT = """
+    query getSystemCollSnapshot {
+      systemSnapshotsUpdateds {
+        timestamp_
+        totalCollateralSnapshot
+        totalStakesSnapshot
+      }
     }
-  }
-  """
+    """
+
+  GET_MUSD_LIQUIDATIONS = """
+    query getLiquidations($skip: Int!) {
+        liquidations(
+            orderBy: timestamp_
+            orderDirection: desc
+            first: 1000
+            skip: $skip
+        ) {  
+            timestamp_
+            liquidatedPrincipal
+            liquidatedInterest
+            liquidatedColl
+            transactionHash_
+        }
+    }
+    """
+  
+  GET_LIQUIDATED_TROVES = """
+    query getTroveLiquidated($skip: Int!) {
+        troveLiquidateds(
+            orderBy: timestamp_
+            orderDirection: desc
+            first: 1000
+            skip: $skip
+        ) {
+            id
+            timestamp_
+            borrower
+            debt
+            coll
+            transactionHash_
+            block_number
+        }
+    }
+    """
 
   GET_LOANS = """
   query getUpdatedMusd($skip: Int!) {
@@ -28,74 +63,32 @@ class MUSDQueries:
   }
   """
 
-  GET_NEW_TROVES = """
-  query getUpdatedLoans($skip: Int!) {
-    troveUpdateds(
-      orderBy: timestamp_
-      orderDirection: desc
-      first: 1000
-      skip: $skip
-      where: {operation: "0"}
-    ) {
-      timestamp_
-      borrower
-      principal
-      coll
-      stake
-      interest
-      operation
-      transactionHash_
-    }
-  }
-  """
-
-  GET_UPDATED_TROVES = """
-  query getUpdatedLoans($skip: Int!) {
-    troveUpdateds(
-      orderBy: timestamp_
-      orderDirection: desc
-      first: 1000
-      skip: $skip
-      where: {operation: "2"}
-    ) {
-      timestamp_
-      borrower
-      principal
-      coll
-      stake
-      interest
-      operation
-      transactionHash_
-    }
-  }
-  """
-
   GET_MARKET_DONATIONS = """
-  query getMarketDonations($skip: Int!) {
-    donateds(first: 1000, orderBy: timestamp_, orderDirection: desc, skip: $skip) {
-      timestamp_
-      recipient
-      amount
-      donor
-      transactionHash_
-      block_number
+    query getMarketDonations($skip: Int!) {
+      donateds(first: 1000, orderBy: timestamp_, orderDirection: desc, skip: $skip) {
+        timestamp_
+        recipient
+        amount
+        donor
+        transactionHash_
+        block_number
+      }
     }
-  }
-  """
+    """
 
   GET_MARKET_PURCHASES = """
-  query getMarketPurchases($skip: Int!) {
-    orderPlaceds(first: 1000, orderBy: timestamp_, orderDirection: desc, skip: $skip) {
-      timestamp_
-      productId
-      price
-      customer
-      orderId
-      transactionHash_
-      block_number
+    query getMarketPurchases($skip: Int!) {
+      orderPlaceds(first: 1000, orderBy: timestamp_, orderDirection: desc, skip: $skip) {
+        timestamp_
+        productId
+        price
+        customer
+        orderId
+        transactionHash_
+        block_number
+      }
     }
-  }
-  """
+    """
 
 class BridgeQueries:
 
@@ -119,9 +112,9 @@ class BridgeQueries:
   """
 
   GET_BRIDGE_TRANSACTIONS = """
-  query bridgedDeposits($skip: Int!) {
-    depositBridgeds(
-      orderBy: timestamp_
+  query getBridgedAssets($skip: Int!) {
+    assetsLockeds(
+      orderBy: timestamp_ 
       orderDirection: desc
       first: 1000
       skip: $skip
@@ -129,14 +122,12 @@ class BridgeQueries:
       timestamp_
       amount
       token
-      depositor
+      recipient
       transactionHash_
-      block_number
-      depositId
     }
   }
   """
-
+  
   GET_WITHDRAWALS = """
   query withdrawnDeposits($skip: Int!) {
     withdrawns(

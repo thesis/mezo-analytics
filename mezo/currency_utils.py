@@ -63,3 +63,15 @@ def get_token_prices():
     df = pd.DataFrame(data)
 
     return df
+
+def get_token_price(token_id):
+    url = 'https://api.coingecko.com/api/v3/simple/price'
+    params = {'ids': token_id, 'vs_currencies': 'usd'}
+    headers = {'x-cg-demo-api-key': COINGECKO_KEY}
+
+    response = requests.get(url, params = params)
+
+    data = response.json()
+    price = data[token_id]['usd']
+    
+    return price

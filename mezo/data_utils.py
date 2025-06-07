@@ -13,13 +13,19 @@ def load_raw_data(filename):
     return df
 
 def add_cumulative_columns(df, cols):
-        return df.assign(**{
-            f'cumulative_{col}': df[col].cumsum()
-            for col in cols
-        }).assign(**{
-            f'cumulative_{col}_growth': df[f'cumulative_{col}'].pct_change()
-            for col in cols
-        })
+    # First, add the cumulative columns
+    df_with_cumulative = df.assign(**{
+        f'cumulative_{col}': df[col].cumsum()
+        for col in cols
+    })
+    
+    # Then, add the growth columns using the updated dataframe
+    df_final = df_with_cumulative.assign(**{
+        f'cumulative_{col}_growth': df_with_cumulative[f'cumulative_{col}'].pct_change()
+        for col in cols
+    })
+    
+    return df_final
     
 def add_pct_change_columns(df, cols, interval):
     return df.assign(**{
