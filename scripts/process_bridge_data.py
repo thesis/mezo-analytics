@@ -1,66 +1,268 @@
+from dotenv import load_dotenv
 import pandas as pd
 from datetime import datetime
 
-from mezo.currency_utils import replace_token_labels, format_currency_columns, get_token_prices
+from scripts.get_raw_data import get_all_bridge_transactions
+from mezo.data_utils import load_raw_data
+from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.currency_config import TOKEN_MAP, TOKEN_TYPE_MAP, TOKENS_ID_MAP
 from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import load_raw_data
-from scripts.get_raw_data import get_all_bridge_transactions
+from mezo.currency_utils import get_token_prices
 from mezo.clients import SupabaseClient
+from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress, safe_operation
 
-supabase = SupabaseClient()
 
-# get raw data from subgraph
-get_all_bridge_transactions()
+@with_progress("Cleaning bridge data")
+def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col):
+    """Clean and format bridge transaction data."""
+    if not ExceptionHandler.validate_dataframe(raw, "Raw bridge data", [sort_col]):
+        raise ValueError("Invalid input data for cleaning")
+    
+    df = raw.copy().sort_values(by=sort_col, ascending=False)
+    df = replace_token_labels(df, TOKEN_MAP)
+    df = format_datetimes(df, date_cols)
+    df = format_currency_columns(df, currency_cols, asset_col)
+    df['count'] = 1
+    return df
 
-updated_on = datetime.today().date()
-raw_bridge_txns = load_raw_data(f'{updated_on}_bridge_txns.csv')
-bridges = raw_bridge_txns.copy()
 
-# gets USD price data for each token from Coingecko API
-tokens = get_token_prices()
-token_usd_prices = tokens.T.reset_index() # transpose the df
+def main():
+    """Main function to process bridge transaction data."""
+    ProgressIndicators.print_ascii_bridge()
+    ProgressIndicators.print_header("BRIDGE DATA PROCESSING PIPELINE")
+    
+    try:
+        # Load environment variables
+        ProgressIndicators.print_step("Loading environment variables", "start")
+        load_dotenv(dotenv_path='../.env', override=True)
+        pd.options.display.float_format = '{:.5f}'.format
+        ProgressIndicators.print_step("Environment loaded successfully", "success")
+        
+        # Get raw bridge transactions
+        def fetch_bridge_data():
+            return get_all_bridge_transactions()
+        
+        ExceptionHandler.handle_with_retry(
+            fetch_bridge_data, 
+            max_retries=3, 
+            delay=2.0
+        )
+        
+        # Load the raw data
+        ProgressIndicators.print_step("Loading raw bridge transaction data", "start")
+        updated_on = datetime.today().date()
+        raw_data = load_raw_data(f'{updated_on}_bridge_txns.csv')
+        
+        if not ExceptionHandler.validate_dataframe(
+            raw_data, "Raw bridge transactions", 
+            ['timestamp_', 'amount', 'token', 'recipient']
+        ):
+            raise ValueError("Invalid raw data structure")
+        
+        ProgressIndicators.print_step(f"Loaded {len(raw_data)} raw bridge transactions", "success")
+        
+        # Clean the bridge data
+        bridge_txns = clean_bridge_data(raw_data, 'timestamp_', ['timestamp_'], ['amount'], 'token')
+        
+        # Get token prices from Coingecko API
+        ProgressIndicators.print_step("Fetching token prices from Coingecko", "start")
+        def fetch_token_prices():
+            prices = get_token_prices()
+            if prices is None or prices.empty:
+                raise ValueError("No token prices received from API")
+            return prices
+        
+        tokens = ExceptionHandler.handle_with_retry(fetch_token_prices, max_retries=3, delay=5.0)
+        token_usd_prices = tokens.T.reset_index()
+        ProgressIndicators.print_step(f"Retrieved prices for {len(token_usd_prices)} tokens", "success")
+        
+        # Map token indices and merge with USD prices
+        ProgressIndicators.print_step("Processing USD price mappings", "start")
+        bridge_txns['index'] = bridge_txns['token'].map(TOKENS_ID_MAP)
+        
+        # Check for unmapped tokens
+        unmapped_tokens = bridge_txns[bridge_txns['index'].isna()]['token'].unique()
+        if len(unmapped_tokens) > 0:
+            ProgressIndicators.print_step(f"Warning: Unmapped tokens found: {unmapped_tokens}", "warning")
+        
+        bridge_txns_with_usd = pd.merge(bridge_txns, token_usd_prices, how='left', on='index')
+        bridge_txns_with_usd['amount_usd'] = bridge_txns_with_usd['amount'] * bridge_txns_with_usd['usd']
+        
+        # Check for missing USD prices
+        missing_prices = bridge_txns_with_usd[bridge_txns_with_usd['amount_usd'].isna()]
+        if len(missing_prices) > 0:
+            ProgressIndicators.print_step(f"Warning: {len(missing_prices)} transactions missing USD prices", "warning")
+        
+        ProgressIndicators.print_step("USD price mapping completed", "success")
+        
+        # Daily bridging data aggregation
+        ProgressIndicators.print_step("Creating daily bridge aggregations", "start")
+        daily_bridge_txns = bridge_txns_with_usd.groupby(['timestamp_']).agg(
+            amount_bridged=('amount_usd', 'sum'),
+            users=('recipient', lambda x: x.nunique()),
+            transactions=('count', 'sum'),
+        ).reset_index()
+        ProgressIndicators.print_step(f"Created daily bridge data: {len(daily_bridge_txns)} days", "success")
+        
+        # Daily bridging data by token
+        ProgressIndicators.print_step("Creating daily bridge data by token", "start")
+        daily_bridge_txns_by_token = bridge_txns_with_usd.groupby(['timestamp_', 'token']).agg(
+            amount_bridged=('amount_usd', 'sum'),
+            users=('recipient', lambda x: x.nunique()),
+            transactions=('count', 'sum'),
+        ).reset_index()
+        ProgressIndicators.print_step(f"Created daily bridge data by token: {len(daily_bridge_txns_by_token)} records", "success")
+        
+        # Pivot the daily data by token
+        ProgressIndicators.print_step("Pivoting daily data by token", "start")
+        daily_bridge_txns_by_token_pivot = daily_bridge_txns_by_token.pivot(
+            index='timestamp_', columns='token'
+        ).fillna(0)
+        
+        # Flatten column names
+        daily_bridge_txns_by_token_pivot.columns = [
+            '_'.join(col).strip() for col in daily_bridge_txns_by_token_pivot.columns.values
+        ]
+        daily_bridge_txns_by_token_pivot = daily_bridge_txns_by_token_pivot.reset_index()
+        
+        # Convert transaction columns to integers
+        transactions_cols = [col for col in daily_bridge_txns_by_token_pivot.columns if col.startswith('transactions_')]
+        daily_bridge_txns_by_token_final = daily_bridge_txns_by_token_pivot.copy()
+        daily_bridge_txns_by_token_final[transactions_cols] = daily_bridge_txns_by_token_final[transactions_cols].astype(int)
+        
+        ProgressIndicators.print_step(f"Pivot completed - shape: {daily_bridge_txns_by_token_final.shape}", "success")
+        
+        # Bridge transactions by token summary
+        ProgressIndicators.print_step("Creating bridge transactions by token summary", "start")
+        bridge_txns_by_token = bridge_txns.groupby('token').agg(
+            bridged_amount=('amount', 'sum'),
+            bridged_transactions=('count', 'sum')
+        ).reset_index()
+        
+        # Add token type mapping
+        bridge_txns_by_token['type'] = bridge_txns_by_token['token'].map(TOKEN_TYPE_MAP)
+        
+        # Map token indices and merge with USD prices
+        bridge_txns_by_token['index'] = bridge_txns_by_token['token'].map(TOKENS_ID_MAP)
+        bridge_txns_by_token_with_usd = pd.merge(bridge_txns_by_token, token_usd_prices, how='left', on='index')
+        bridge_txns_by_token_with_usd['bridged_amount_usd'] = (
+            bridge_txns_by_token_with_usd['bridged_amount'] * bridge_txns_by_token_with_usd['usd']
+        )
+        
+        # Final bridge transactions by token
+        final_bridge_txns_by_token = bridge_txns_by_token_with_usd[[
+            'token', 'bridged_amount', 'bridged_transactions', 'bridged_amount_usd'
+        ]]
+        ProgressIndicators.print_step(f"Token summary created: {len(final_bridge_txns_by_token)} tokens", "success")
+        
+        # Summary statistics
+        ProgressIndicators.print_step("Calculating summary statistics", "start")
+        total_bridged = bridge_txns_with_usd['amount_usd'].sum()
+        total_bridge_txns = bridge_txns_with_usd['count'].sum()
+        total_bridgers = bridge_txns_with_usd['recipient'].nunique()
+        
+        total_bridged_btc_assets = (
+            bridge_txns_by_token_with_usd.loc[
+                bridge_txns_by_token_with_usd['type'] == 'bitcoin'
+            ]['bridged_amount']
+        ).sum()
+        total_bridged_stablecoins = (
+            bridge_txns_by_token_with_usd.loc[
+                bridge_txns_by_token_with_usd['type'] == 'stablecoin'
+            ]['bridged_amount']
+        ).sum()
+        total_bridged_T = sum(
+            bridge_txns_by_token_with_usd.loc[
+                bridge_txns_by_token_with_usd['type'] == 'ethereum'
+            ]['bridged_amount']
+        )
+        
+        autobridge_summary = {
+            'total_amt_bridged': total_bridged,
+            'total_transactions': total_bridge_txns,
+            'total_wallets': total_bridgers,
+            'total_bitcoin_bridged': total_bridged_btc_assets,
+            'total_stablecoins_bridged': total_bridged_stablecoins,
+            'total_T_bridged': total_bridged_T
+        }
+        
+        autobridge_summary_df = pd.DataFrame([autobridge_summary])
+        ProgressIndicators.print_step("Summary statistics calculated", "success")
+        
+        # Display summary in a nice box
+        ProgressIndicators.print_summary_box(
+            f"{ProgressIndicators.COIN} BRIDGE SUMMARY STATISTICS {ProgressIndicators.COIN}",
+            {
+                "Total Amount Bridged": total_bridged,
+                "Total Transactions": total_bridge_txns,
+                "Unique Bridgers": total_bridgers,
+                "Bitcoin Assets": total_bridged_btc_assets,
+                "Stablecoins": total_bridged_stablecoins,
+                "T Token": total_bridged_T
+            }
+        )
+        
+        # Upload to Supabase with dynamic table creation
+        ProgressIndicators.print_step("Uploading to Supabase", "start")
+        supabase = SupabaseClient()
+        
+        # Clean data for Supabase compatibility
+        def clean_dataframe_for_upload(df):
+            """Clean DataFrame for Supabase upload."""
+            import numpy as np
+            cleaned_df = df.copy()
+            # Convert column names to lowercase
+            cleaned_df.columns = [col.lower() for col in df.columns]
+            # Convert timestamp to string
+            for col in cleaned_df.columns:
+                if 'time' in col or 'date' in col or col.endswith('_'):
+                    cleaned_df[col] = cleaned_df[col].astype(str)
+            # Replace NaN with None
+            cleaned_df = cleaned_df.replace({np.nan: None})
+            return cleaned_df
+        
+        upload_operations = [
+            ('mainnet_daily_bridge_data', clean_dataframe_for_upload(daily_bridge_txns_by_token_final)),
+            ('mainnet_bridge_by_token', clean_dataframe_for_upload(final_bridge_txns_by_token)),
+            ('mainnet_bridge_summary', clean_dataframe_for_upload(autobridge_summary_df))
+        ]
+        
+        successful_uploads = 0
+        for table_name, data in upload_operations:
+            try:
+                # Ensure table exists with correct structure
+                if supabase.ensure_table_exists_for_dataframe(table_name, data):
+                    supabase.update_supabase(table_name, data)
+                    ProgressIndicators.print_step(f"Uploaded to {table_name}", "success")
+                    successful_uploads += 1
+                else:
+                    ProgressIndicators.print_step(f"Failed to create/verify table {table_name}", "error")
+            except Exception as e:
+                ProgressIndicators.print_step(f"Failed to upload to {table_name}: {str(e)}", "error")
+        
+        if successful_uploads == len(upload_operations):
+            ProgressIndicators.print_step("All data uploaded to Supabase successfully", "success")
+        else:
+            ProgressIndicators.print_step(f"Partial upload success: {successful_uploads}/{len(upload_operations)}", "warning")
+        
+        ProgressIndicators.print_header(f"{ProgressIndicators.ROCKET} PROCESSING COMPLETED SUCCESSFULLY {ProgressIndicators.ROCKET}")
+        
+        return {
+            'daily_bridge_data': daily_bridge_txns_by_token_final,
+            'bridge_by_token': final_bridge_txns_by_token,
+            'summary': autobridge_summary_df
+        }
+        
+    except Exception as e:
+        ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
+        ProgressIndicators.print_header(f"{ProgressIndicators.ERROR} PROCESSING FAILED")
+        print(f"\n{ProgressIndicators.INFO} Error traceback:")
+        print(f"{'─' * 50}")
+        import traceback
+        traceback.print_exc()
+        print(f"{'─' * 50}")
+        raise
 
-df_formatted = replace_token_labels(bridges, TOKEN_MAP) # convert token addresses to tickers
-df_formatted2 = format_currency_columns(df_formatted, ['amount'], 'token') # make token amts human readable
-df_formatted3 = format_datetimes(df_formatted2, ['timestamp_']) # converts UNIX dt to human readable date
 
-bridges_formatted = df_formatted3.copy()
-
-# create a dataframe grouped by bridged tokens
-bridge_by_token = bridges_formatted.groupby('token').agg(
-    amount = ('amount', 'sum'),
-    transactions = ('timestamp_', 'count')
-).reset_index()
-
-# compute token price data in USD
-bridge_by_token['type'] = bridge_by_token['token'].map(TOKEN_TYPE_MAP) # assign a "type" to each token
-bridge_by_token['index'] = bridge_by_token['token'].map(TOKENS_ID_MAP) # maps Coingecko token ID to the token
-bridge_by_token_usd = pd.merge(bridge_by_token, token_usd_prices, how='left', on='index') # merges so USD price maps to token
-bridge_by_token_usd['amount_usd'] = bridge_by_token_usd['amount'] * bridge_by_token_usd['usd'] # computes the total bridged amount for a token in USD
-
-final_bridge_by_token = bridge_by_token_usd.copy()
-
-# compute summary data points
-total_amt_bridged = final_bridge_by_token['amount_usd'].sum()
-total_bridge_txns = final_bridge_by_token['transactions'].sum()
-total_wallets = pd.DataFrame(bridges_formatted['depositor'].unique()).count()[0]
-total_btc_bridged = final_bridge_by_token.loc[final_bridge_by_token['type'] == 'bitcoin']['amount'].sum()
-total_stablecoins_bridged = final_bridge_by_token.loc[final_bridge_by_token['type'] == 'stablecoin']['amount'].sum()
-total_T_bridged = final_bridge_by_token.loc[final_bridge_by_token['type'] == 'ethereum']['amount'].sum()
-
-d = {
-    'total_amt_bridged' : [total_amt_bridged], 
-    'total_transactions' : [total_bridge_txns], 
-    'total_wallets' : [total_wallets],
-    'total_btc_bridged' : [total_btc_bridged], 
-    'total_stablecoins_bridged' : [total_stablecoins_bridged], 
-    'total_T_bridged' : [total_T_bridged]
-}
-
-bridge_summary = pd.DataFrame(data=d)
-bridge_by_token_df = final_bridge_by_token[['token', 'amount', 'transactions', 'amount_usd']]
-bridge_by_token_df.dtypes
-
-supabase.update_supabase('mainnet_bridge_by_token', bridge_by_token_df)
-supabase.update_supabase('mainnet_bridge_summary', bridge_summary)
+if __name__ == "__main__":
+    results = main()
