@@ -56,7 +56,7 @@ jobs:
         
     - name: 📊 Upload Bridge Processing Artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: bridge-processing-logs-${{ github.run_number }}
         path: |
@@ -96,7 +96,7 @@ jobs:
         
     - name: 📊 Upload MUSD Processing Artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: musd-processing-logs-${{ github.run_number }}
         path: |

@@ -71,7 +71,7 @@ jobs:
         
     - name: 📊 Upload Processing Artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: manual-processing-${{ github.event.inputs.script_to_run }}-${{ github.run_number }}
         path: |
