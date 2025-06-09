@@ -5,10 +5,10 @@ import requests
 import pandas as pd
 import numpy as np
 import pandas as pd
-from google.cloud import bigquery
-from google.cloud.exceptions import NotFound
-from google.cloud import bigquery
 from supabase import create_client, Client
+# from google.cloud import bigquery
+# from google.cloud.exceptions import NotFound
+# from google.cloud import bigquery
 
 class SubgraphClient:
     """A class to handle subgraph API requests."""
@@ -285,44 +285,7 @@ class SupabaseClient:
                 add_indexes=timestamp_cols if timestamp_cols else None
             )
 
-class BigQueryClient:
-    def __init__(self, project_id: str = None):
-        # Load and set credentials
-        credentials_path = os.getenv("GOOGLE_CLOUD_KEY")
-        if not credentials_path:
-            raise ValueError("Missing GOOGLE_CLOUD_KEY in .env")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-
-        self.client = bigquery.Client(project=project_id)
-
-    def create_dataset(self, dataset_id: str, location: str = "US"):
-        dataset_ref = bigquery.Dataset(self.client.dataset(dataset_id))
-        try:
-            self.client.get_dataset(dataset_ref)
-            print(f"✅ Dataset '{dataset_id}' already exists.")
-        except NotFound:
-            dataset = bigquery.Dataset(dataset_ref)
-            dataset.location = location
-            self.client.create_dataset(dataset)
-            print(f"✅ Created dataset '{dataset_id}'.")
-
-    def create_table(self, dataset_id: str, table_id: str, schema: list):
-        table_ref = self.client.dataset(dataset_id).table(table_id)
-        try:
-            self.client.get_table(table_ref)
-            print(f"✅ Table '{table_id}' already exists in '{dataset_id}'.")
-        except NotFound:
-            table = bigquery.Table(table_ref, schema=schema)
-            self.client.create_table(table)
-            print(f"✅ Created table '{table_id}' in dataset '{dataset_id}'.")
-
-    def upload_dataframe(self, df: pd.DataFrame, dataset_id: str, table_id: str):
-        table_ref = self.client.dataset(dataset_id).table(table_id)
-        job = self.client.load_table_from_dataframe(df, table_ref)
-        job.result()
-        print(f"📤 Uploaded {df.shape[0]} rows to {dataset_id}.{table_id}")
-
-    # A helper for the Mezo chain API
+# A helper for the Mezo chain API
 
 class APIClient:
     """A class to handle API requests for contract data."""
@@ -354,3 +317,41 @@ class APIClient:
                 break
 
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+    
+
+# class BigQueryClient:
+#     def __init__(self, project_id: str = None):
+#         # Load and set credentials
+#         credentials_path = os.getenv("GOOGLE_CLOUD_KEY")
+#         if not credentials_path:
+#             raise ValueError("Missing GOOGLE_CLOUD_KEY in .env")
+#         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+
+#         self.client = bigquery.Client(project=project_id)
+
+#     def create_dataset(self, dataset_id: str, location: str = "US"):
+#         dataset_ref = bigquery.Dataset(self.client.dataset(dataset_id))
+#         try:
+#             self.client.get_dataset(dataset_ref)
+#             print(f"✅ Dataset '{dataset_id}' already exists.")
+#         except NotFound:
+#             dataset = bigquery.Dataset(dataset_ref)
+#             dataset.location = location
+#             self.client.create_dataset(dataset)
+#             print(f"✅ Created dataset '{dataset_id}'.")
+
+#     def create_table(self, dataset_id: str, table_id: str, schema: list):
+#         table_ref = self.client.dataset(dataset_id).table(table_id)
+#         try:
+#             self.client.get_table(table_ref)
+#             print(f"✅ Table '{table_id}' already exists in '{dataset_id}'.")
+#         except NotFound:
+#             table = bigquery.Table(table_ref, schema=schema)
+#             self.client.create_table(table)
+#             print(f"✅ Created table '{table_id}' in dataset '{dataset_id}'.")
+
+#     def upload_dataframe(self, df: pd.DataFrame, dataset_id: str, table_id: str):
+#         table_ref = self.client.dataset(dataset_id).table(table_id)
+#         job = self.client.load_table_from_dataframe(df, table_ref)
+#         job.result()
+#         print(f"📤 Uploaded {df.shape[0]} rows to {dataset_id}.{table_id}")
