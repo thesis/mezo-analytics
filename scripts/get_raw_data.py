@@ -1,7 +1,7 @@
 import pandas as pd
 from mezo.clients import SubgraphClient
 from mezo.queries import BridgeQueries, MUSDQueries
-from mezo.data_utils import save_raw_data
+# from mezo.data_utils import save_raw_data
 
 pd.options.display.float_format = '{:.6f}'.format
 
@@ -19,7 +19,7 @@ def get_all_autobridge_transactions():
     )
     
     df = pd.DataFrame(autobridges)
-    save_raw_data(df, 'autobridges.csv')
+    # save_raw_data(df, 'autobridges.csv')
 
     return df
 
@@ -37,7 +37,7 @@ def get_all_bridge_transactions():
     )
     
     df = pd.DataFrame(bridge)
-    save_raw_data(df, 'bridge_txns.csv')
+    # save_raw_data(df, 'bridge_txns.csv')
 
     return df
 
@@ -61,7 +61,7 @@ def get_all_loans():
             df = pd.DataFrame(loans)
             print(f"✅ Found {len(loans)} loan records")
             
-            save_raw_data(df, 'musd_loans.csv')
+            # save_raw_data(df, 'musd_loans.csv')
             return df
         else:
             print("⚠️ troveUpdates query returned no data")
@@ -87,7 +87,7 @@ def get_liquidation_data():
             liquidations_df = pd.DataFrame(liquidations_data)
             print(f"✅ Found {len(liquidations_df)} liquidation records")
             
-            save_raw_data(liquidations_df, 'musd_liquidations.csv')
+            # save_raw_data(liquidations_df, 'musd_liquidations.csv')
             return liquidations_df
         else:
             print("⚠️ liquidations query returned no data")
@@ -114,7 +114,7 @@ def get_trove_liquidated_data():
             trove_liquidated_df = pd.DataFrame(trove_liquidated_data)
             print(f"✅ Found {len(trove_liquidated_df)} trove liquidation records")
             
-            save_raw_data(trove_liquidated_df, 'musd_troves_liquidated.csv')
+            # save_raw_data(trove_liquidated_df, 'musd_troves_liquidated.csv')
             return trove_liquidated_df
         else:
             print("⚠️ troveLiquidateds query returned no data")
