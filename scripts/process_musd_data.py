@@ -1,11 +1,9 @@
 import pandas as pd
-from datetime import datetime
 from dotenv import load_dotenv
 import os
 import requests
 from mezo.currency_utils import format_musd_currency_columns, get_token_price
 from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import load_raw_data
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
 from mezo.clients import SupabaseClient
 from scripts.get_raw_data import get_all_loans, get_liquidation_data, get_trove_liquidated_data
@@ -15,10 +13,10 @@ COINGECKO_KEY = os.getenv('COINGECKO_KEY')
 
 supabase = SupabaseClient()
 
-# import raw data into csv's
-get_all_loans()
-get_liquidation_data()
-get_trove_liquidated_data()
+# import raw data
+raw_loans = get_all_loans()
+raw_liquidations = get_liquidation_data()
+raw_troves_liquidated = get_trove_liquidated_data()
 
 # helpers
 def clean_loan_data(raw, sort_col, date_cols, currency_cols):
@@ -50,12 +48,6 @@ def get_loans_subset(df, operation, equals):
     return adjusted
 
 #####################################################
-
-# load raw data
-updated_on = datetime.today().date()
-raw_loans = load_raw_data(f'{updated_on}_musd_loans.csv')
-raw_liquidations = load_raw_data(f'{updated_on}_musd_liquidations.csv')
-raw_troves_liquidated = load_raw_data(f'{updated_on}_musd_troves_liquidated.csv')
 
 # clean raw data
 loans = clean_loan_data(
@@ -364,6 +356,12 @@ daily_musd_final_3 = add_pct_change_columns(daily_musd_final_2, ['net_musd', 'ne
 daily_musd_final_4 = daily_musd_final_3.replace([float('inf'), -float('inf')], 0)
 final_daily_musd = daily_musd_final_4.copy()
 final_daily_musd['date'] = pd.to_datetime(final_daily_musd['date']).dt.strftime('%Y-%m-%d')
+
+# Convert integer columns that may have become floats back to integers
+integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
+for col in integer_columns:
+    if col in final_daily_musd.columns:
+        final_daily_musd[col] = final_daily_musd[col].astype(int)
 
 supabase.update_supabase('mainnet_musd_daily', final_daily_musd)
 

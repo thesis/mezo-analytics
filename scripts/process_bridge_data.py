@@ -1,9 +1,7 @@
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime
 
 from scripts.get_raw_data import get_all_bridge_transactions
-from mezo.data_utils import load_raw_data
 from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.currency_config import TOKEN_MAP, TOKEN_TYPE_MAP, TOKENS_ID_MAP
 from mezo.datetime_utils import format_datetimes
@@ -39,19 +37,10 @@ def main():
         ProgressIndicators.print_step("Environment loaded successfully", "success")
         
         # Get raw bridge transactions
-        def fetch_bridge_data():
-            return get_all_bridge_transactions()
-        
-        ExceptionHandler.handle_with_retry(
-            fetch_bridge_data, 
-            max_retries=3, 
-            delay=2.0
-        )
-        
+        raw_data = get_all_bridge_transactions()
+
         # Load the raw data
         ProgressIndicators.print_step("Loading raw bridge transaction data", "start")
-        updated_on = datetime.today().date()
-        raw_data = load_raw_data(f'{updated_on}_bridge_txns.csv')
         
         if not ExceptionHandler.validate_dataframe(
             raw_data, "Raw bridge transactions", 
