@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Enable version updates for pip
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    # Limit number of open PRs
+    open-pull-requests-limit: 10
+    # Group updates to reduce PR noise
+    groups:
+      data-processing:
+        patterns:
+          - "pandas*"
+          - "numpy*"
+          - "requests*"
+      database:
+        patterns:
+          - "supabase*"
+      development:
+        patterns:
+          - "pytest*"
+          - "ruff*"
+          - "ipython*"
+          - "jupyter*"
+    # Allow all types of updates (patch, minor, major)
+    allow:
+      - dependency-type: "direct"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "direct"
+        update-type: "version-update:semver-minor"
+      - dependency-type: "direct"
+        update-type: "version-update:semver-major"
+    # Custom commit message
+    commit-message:
+      prefix: "deps"
+      include: "scope"
