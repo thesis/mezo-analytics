@@ -26,7 +26,7 @@ Data Sources → Processing Scripts → Supabase Database → Analytics/Visualiz
 ## Project Structure
 
 ```
-mezo-analytics-mainnet/
+mezo-analytics/
 ├── .github/workflows/          # GitHub Actions for automation
 │   ├── data-processing.yml     # Main cron job (every 6 hours)
 │   └── manual-data-processing.yml  # Manual trigger workflow
@@ -179,7 +179,7 @@ python scripts/process_musd_data.py
 
 ### Adding New Data Sources
 1. Create fetch functions in `scripts/get_raw_data.py`
-2. Add processing logic following existing patterns
+2. Add processing logic following existing patterns and naming conventions
 3. Update configurations in `mezo/currency_config.py`
 4. Add tests in `tests/`
 
