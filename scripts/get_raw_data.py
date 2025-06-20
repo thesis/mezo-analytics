@@ -120,3 +120,35 @@ def get_trove_liquidated_data():
             print("⚠️ troveLiquidateds query returned no data")
     except Exception as e:
         print(f"❌ troveLiquidateds query failed: {e}")
+
+
+def get_all_market_donations():
+    """Calls the subgraph API endpoint for the MUSD market contracts to retrieve donations"""
+    portal = SubgraphClient(
+        url=SubgraphClient.MUSD_MARKET_SUBGRAPH, 
+        headers=SubgraphClient.SUBGRAPH_HEADERS
+    )
+
+    donations = portal.fetch_subgraph_data(
+        MUSDQueries.GET_MARKET_DONATIONS, 
+        'donateds'
+    )
+    
+    df = pd.DataFrame(donations)
+    return df
+
+
+def get_all_market_purchases():
+    """Calls the subgraph API endpoint for the MUSD market contracts to retrieve purchases"""
+    portal = SubgraphClient(
+        url=SubgraphClient.MUSD_MARKET_SUBGRAPH, 
+        headers=SubgraphClient.SUBGRAPH_HEADERS
+    )
+
+    purchases = portal.fetch_subgraph_data(
+        MUSDQueries.GET_MARKET_PURCHASES, 
+        'orderPlaceds'
+    )
+    
+    df = pd.DataFrame(purchases)
+    return df

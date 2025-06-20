@@ -17,6 +17,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      run_market_data:
+        description: 'Run market data processing'
+        required: false
+        default: 'true'
+        type: boolean
 
 env:
   PYTHON_VERSION: 3.13
@@ -83,3 +88,34 @@ jobs:
         echo "🚀 Starting MUSD data processing..."
         python scripts/process_musd_data.py
         echo "✅ MUSD data processing completed"
+
+  process-market-data:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_market_data == 'true')
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🛒 Process Market Data
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+      run: |
+        echo "🚀 Starting market data processing..."
+        python scripts/process_market_data.py
+        echo "✅ Market data processing completed"

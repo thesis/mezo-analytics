@@ -5,18 +5,33 @@ import requests
 from mezo.currency_utils import format_musd_currency_columns, get_token_price
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
-from mezo.clients import SupabaseClient
+from mezo.clients import SupabaseClient, BigQueryClient
 from scripts.get_raw_data import get_all_loans, get_liquidation_data, get_trove_liquidated_data
 
 load_dotenv(dotenv_path='../.env', override=True)
 COINGECKO_KEY = os.getenv('COINGECKO_KEY')
 
 supabase = SupabaseClient()
+bq = BigQueryClient(project_id='mezo-portal-data')
 
 # import raw data
 raw_loans = get_all_loans()
 raw_liquidations = get_liquidation_data()
 raw_troves_liquidated = get_trove_liquidated_data()
+
+# Upload raw data to BigQuery
+print("📤 Uploading raw data to BigQuery...")
+if raw_loans is not None and len(raw_loans) > 0:
+    bq.update_table(raw_loans, 'raw_data', 'musd_loans')
+    print("✅ Uploaded raw_loans to BigQuery")
+
+if raw_liquidations is not None and len(raw_liquidations) > 0:
+    bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations')
+    print("✅ Uploaded raw_liquidations to BigQuery")
+
+if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
+    bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated')
+    print("✅ Uploaded raw_troves_liquidated to BigQuery")
 
 # helpers
 def clean_loan_data(raw, sort_col, date_cols, currency_cols):
@@ -35,11 +50,12 @@ def find_coll_ratio(df, token_id):
 
     return df
 
-def get_loans_subset(df, operation, equals):
+def get_loans_subset(df, operation: int, equals):
     """Create a df with only new, adjusted, or closed loans
     0 = opened, 1 = closed, 2 = adjusted
     note: operation = 2 also includes liquidated loans, so we have to remove those manually
     """
+    df['operation'] = df['operation'].astype(int)
     if equals is True:
         adjusted = df.loc[df['operation'] == operation]
     elif equals is False:
@@ -315,8 +331,7 @@ daily_closed_loans = closed_loans.groupby(['timestamp_']).agg(
 ).reset_index()
 
 daily_new_and_closed_loans = pd.merge(daily_new_loans, daily_closed_loans, how = 'outer', on = 'timestamp_').fillna(0)
-daily_new_and_closed_loans[['loans_closed', 'borrowers_who_closed']] = daily_new_and_closed_loans[['loans_closed', 'borrowers_who_closed']].astype('int')
-
+daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']] = daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']].astype('int')      
 daily_adjusted_loans = adjusted_loans.groupby(['timestamp_']).agg(
     loans_adjusted = ('count', 'sum'),
     borrowers_who_adjusted = ('borrower', lambda x: x.nunique())
@@ -445,3 +460,8 @@ supabase.append_to_supabase('mainnet_musd_token_summary', musd_token)
 # supabase.update_supabase('mainnet_musd_token_summary', musd_token)
 
 print('🚀 Run successful!')
+
+# # Upload raw MUSD token transfers to BigQuery
+# if len(musd_transfers) > 0:
+#     bq.update_table(musd_transfers, 'raw_data', 'musd_token_transfers')
+#     print("✅ Uploaded raw musd_transfers to BigQuery")
