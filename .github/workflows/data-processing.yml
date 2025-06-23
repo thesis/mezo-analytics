@@ -53,6 +53,7 @@ jobs:
         SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
         SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
         COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
       run: |
         echo "🚀 Starting bridge data processing..."
         python scripts/process_bridge_data.py
@@ -84,6 +85,7 @@ jobs:
         SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
         SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
         COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
       run: |
         echo "🚀 Starting MUSD data processing..."
         python scripts/process_musd_data.py
@@ -115,6 +117,7 @@ jobs:
         SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
         SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
         COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
       run: |
         echo "🚀 Starting market data processing..."
         python scripts/process_market_data.py
