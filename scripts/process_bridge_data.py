@@ -6,7 +6,7 @@ from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.currency_config import TOKEN_MAP, TOKEN_TYPE_MAP, TOKENS_ID_MAP
 from mezo.datetime_utils import format_datetimes
 from mezo.currency_utils import get_token_prices
-from mezo.clients import SupabaseClient
+from mezo.clients import SupabaseClient, BigQueryClient
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress, safe_operation
 
 
@@ -38,6 +38,13 @@ def main():
         
         # Get raw bridge transactions
         raw_data = get_all_bridge_transactions()
+        
+        # Upload raw data to BigQuery
+        ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
+        bq = BigQueryClient(project_id='mezo-portal-data')
+        if raw_data is not None and len(raw_data) > 0:
+            bq.update_table(raw_data, 'raw_data', 'bridge_transactions')
+            ProgressIndicators.print_step("Uploaded raw bridge data to BigQuery", "success")
 
         # Load the raw data
         ProgressIndicators.print_step("Loading raw bridge transaction data", "start")
