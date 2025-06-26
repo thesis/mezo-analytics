@@ -9,6 +9,9 @@ from supabase import create_client, Client
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.cloud import bigquery
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path='../.env', override=True)
 
 class SubgraphClient:
     """A class to handle subgraph API requests."""
@@ -362,8 +365,57 @@ class BigQueryClient:
             self.client.create_table(table)
             print(f"✅ Created table '{table_id}' in dataset '{dataset_id}'.")
 
-    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str):
+    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str, unique_column: str = None):
+        """
+        Append only new rows to BigQuery table based on a unique identifier column.
+        
+        Args:
+            df: DataFrame to upload
+            dataset_id: BigQuery dataset ID
+            table_id: BigQuery table ID
+            unique_column: Column name to check for duplicates (e.g., 'id', 'hash', 'timestamp')
+        """
         table_ref = self.client.dataset(dataset_id).table(table_id)
-        job = self.client.load_table_from_dataframe(df, table_ref)
+        
+        # If no unique column specified, use transaction_hash
+        if unique_column is None:
+            unique_column = 'transaction_hash'
+        
+        if unique_column and unique_column in df.columns:
+            # Get existing values from BigQuery for the unique column
+            try:
+                query = f"""
+                SELECT DISTINCT {unique_column}
+                FROM `{dataset_id}.{table_id}`
+                """
+                existing_values = self.client.query(query).to_dataframe()
+                existing_set = set(existing_values[unique_column].tolist())
+                
+                # Filter out rows that already exist
+                new_rows_mask = ~df[unique_column].isin(existing_set)
+                new_df = df[new_rows_mask].copy()
+                
+                if new_df.empty:
+                    print(f"✅ No new rows to upload to {dataset_id}.{table_id}")
+                    return
+                    
+                print(f"📊 Found {len(new_df)} new rows out of {len(df)} total rows")
+                
+            except Exception as e:
+                print(f"⚠️ Could not check existing data (table might be empty): {e}")
+                print(f"📤 Uploading all {len(df)} rows...")
+                new_df = df.copy()
+        else:
+            print(f"⚠️ No unique column found or specified, uploading all rows")
+            new_df = df.copy()
+        
+        # Upload new rows only
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+        )
+        
+        job = self.client.load_table_from_dataframe(
+            new_df, table_ref, job_config=job_config
+        )
         job.result()
-        print(f"📤 Uploaded {df.shape[0]} rows to {dataset_id}.{table_id}")
+        print(f"📤 Successfully uploaded {new_df.shape[0]} new rows to {dataset_id}.{table_id}")
