@@ -48,6 +48,9 @@ def process_donations_data(donations):
     }
     donations_formatted = donations_formatted.rename(columns=donations_col_map)
     
+    # Add id column for BigQuery upload
+    donations_formatted['id'] = range(1, len(donations_formatted) + 1)
+
     return donations_formatted
 
 @with_progress("Processing purchases data")
@@ -68,6 +71,9 @@ def process_purchases_data(purchases):
         'customer': 'wallet'
     }
     purchases_formatted = purchases_formatted.rename(columns=purchases_col_map)
+
+    # Add id column for BigQuery upload
+    purchases_formatted['id'] = range(1, len(purchases_formatted) + 1)
     
     return purchases_formatted
 
@@ -78,18 +84,20 @@ def create_market_transactions(donations_formatted, purchases_formatted):
     market_transactions = pd.merge(donations_formatted, purchases_formatted, how='outer').fillna(0)
     
     # Select and clean final columns
-    market_transactions_final = market_transactions[['date', 'item', 'amount', 'wallet', 'orderId']].copy()
+    market_transactions_final = market_transactions[['date', 'item', 'amount', 'wallet', 'id']].copy()
     
     # Convert data types for Supabase compatibility
-    market_transactions_final[['date', 'item', 'wallet', 'orderId']] = market_transactions_final[['date', 'item', 'wallet', 'orderId']].astype(str)
+    market_transactions_final[['date', 'item', 'wallet']] = market_transactions_final[['date', 'item', 'wallet']].astype(str)
     market_transactions_final['amount'] = market_transactions_final['amount'].astype(int)
+
+    # Add 'count' column
+    market_transactions_final['count'] = 1
     
     return market_transactions_final
 
 
 def main():
     """Main function to process market transaction data."""
-    ProgressIndicators.print_ascii_bridge()
     ProgressIndicators.print_header("MARKET DATA PROCESSING PIPELINE")
     
     try:
@@ -106,13 +114,16 @@ def main():
         purchases = get_all_market_purchases()
         
         # Upload raw data to BigQuery
+        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+
         ProgressIndicators.print_step("Uploading raw market data to BigQuery", "start")
-        bq = BigQueryClient(project_id='mezo-portal-data')
         if donations is not None and len(donations) > 0:
+            donations['id'] = range(1, len(donations) + 1)
             bq.update_table(donations, 'raw_data', 'market_donations')
             ProgressIndicators.print_step("Uploaded raw donations to BigQuery", "success")
             
         if purchases is not None and len(purchases) > 0:
+            purchases['id'] = range(1, len(purchases) + 1)
             bq.update_table(purchases, 'raw_data', 'market_purchases')
             ProgressIndicators.print_step("Uploaded raw purchases to BigQuery", "success")
         
@@ -137,6 +148,11 @@ def main():
         
         # Create unified market transactions
         market_transactions_final = create_market_transactions(donations_processed, purchases_processed)
+
+        ProgressIndicators.print_step("Uploading cleaned market data to BigQuery", "start")
+        if market_transactions_final is not None and len(market_transactions_final) > 0:
+            bq.update_table(market_transactions_final, 'staging', 'market_transactions_clean')
+            ProgressIndicators.print_step("Uploaded cleaned market data to BigQuery", "success")
         
         # Display summary statistics
         ProgressIndicators.print_summary_box(

@@ -12,7 +12,7 @@ load_dotenv(dotenv_path='../.env', override=True)
 COINGECKO_KEY = os.getenv('COINGECKO_KEY')
 
 supabase = SupabaseClient()
-bq = BigQueryClient(project_id='mezo-portal-data')
+bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
 
 # import raw data
 raw_loans = get_all_loans()
@@ -22,15 +22,18 @@ raw_troves_liquidated = get_trove_liquidated_data()
 # Upload raw data to BigQuery
 print("📤 Uploading raw data to BigQuery...")
 if raw_loans is not None and len(raw_loans) > 0:
-    bq.update_table(raw_loans, 'raw_data', 'musd_loans')
+    raw_loans['id'] = range(1, len(raw_loans) + 1)
+    bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw')
     print("✅ Uploaded raw_loans to BigQuery")
 
 if raw_liquidations is not None and len(raw_liquidations) > 0:
-    bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations')
+    raw_liquidations['id'] = range(1, len(raw_liquidations) + 1)
+    bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw')
     print("✅ Uploaded raw_liquidations to BigQuery")
 
 if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
-    bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated')
+    raw_troves_liquidated['id'] = range(1, len(raw_troves_liquidated) + 1)
+    bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw')
     print("✅ Uploaded raw_troves_liquidated to BigQuery")
 
 # helpers
@@ -39,6 +42,7 @@ def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     df = format_datetimes(df, date_cols)
     df = format_musd_currency_columns(df, currency_cols)
     df['count'] = 1
+    df['id'] = range(1, len(df) + 1)
 
     return df
 
@@ -62,32 +66,6 @@ def get_loans_subset(df, operation: int, equals):
         adjusted = df.loc[df['operation'] != operation]
 
     return adjusted
-
-#####################################################
-
-# clean raw data
-loans = clean_loan_data(
-    raw_loans, 
-    sort_col='timestamp_', 
-    date_cols=['timestamp_'], 
-    currency_cols=['principal', 'coll', 'stake', 'interest']
-)
-
-loans = find_coll_ratio(loans, 'bitcoin')
-
-liquidations = clean_loan_data(
-    raw_liquidations,
-    sort_col='timestamp_',
-    date_cols=['timestamp_'],
-    currency_cols=['liquidatedPrincipal', 'liquidatedInterest', 'liquidatedColl']
-)
-
-troves_liquidated = clean_loan_data(
-    raw_troves_liquidated,
-    sort_col='timestamp_',
-    date_cols=['timestamp_'],
-    currency_cols=['debt', 'coll']
-)
 
 def process_liquidation_data(liquidations, troves_liquidated):
     # Merge raw liquidation data from two queries
@@ -124,10 +102,36 @@ def process_liquidation_data(liquidations, troves_liquidated):
 
     return liquidations_final
 
+#####################################################
+
+# clean raw data
+loans = clean_loan_data(
+    raw_loans, 
+    sort_col='timestamp_', 
+    date_cols=['timestamp_'], 
+    currency_cols=['principal', 'coll', 'stake', 'interest']
+)
+
+loans = find_coll_ratio(loans, 'bitcoin')
+
+liquidations = clean_loan_data(
+    raw_liquidations,
+    sort_col='timestamp_',
+    date_cols=['timestamp_'],
+    currency_cols=['liquidatedPrincipal', 'liquidatedInterest', 'liquidatedColl']
+)
+
+troves_liquidated = clean_loan_data(
+    raw_troves_liquidated,
+    sort_col='timestamp_',
+    date_cols=['timestamp_'],
+    currency_cols=['debt', 'coll']
+)
+
 # Create df for liquidated loans
 liquidations_final = process_liquidation_data(liquidations, troves_liquidated)
 
-# Create df's for new loans, closed loans, and adjusted loans
+# Create df's for new loans, closed loans, and adjusted loans and upload to BigQuery
 new_loans = get_loans_subset(loans, 0, True)
 closed_loans = get_loans_subset(loans, 1, True)
 adjusted_loans = get_loans_subset(loans, 2, True) # Only adjusted loans (incl multiple adjustments from a single user)
@@ -150,10 +154,7 @@ latest_open_loans = latest_open_loans[~latest_open_loans['borrower'].isin(liquid
 ##################################
 
 # Break down adjusted loan types for analysis
-## Set up a df for adjusted loan analysis
-
 adjusted_loans = adjusted_loans.sort_values(by=['borrower', 'timestamp_'])
-
 first_tx = adjusted_loans.groupby('borrower').first().reset_index()
 
 adjusted_loans_merged = adjusted_loans.merge(
@@ -165,48 +166,141 @@ adjusted_loans_merged = adjusted_loans.merge(
 ## Loan increases
 increased_loans = adjusted_loans_merged[adjusted_loans_merged['principal'] 
                                         > adjusted_loans_merged['principal_initial']].copy()
+increased_loans['type'] = 1
 
 ## Collateral changes
 coll_increased = adjusted_loans_merged[adjusted_loans_merged['coll'] 
                                        > adjusted_loans_merged['coll_initial']].copy()
+coll_increased['type'] = 2
 
 coll_decreased = adjusted_loans_merged[adjusted_loans_merged['coll'] 
                                        < adjusted_loans_merged['coll_initial']].copy()
+coll_decreased['type'] = 3
 
 ## MUSD Repayments
 principal_decreased = adjusted_loans_merged[adjusted_loans_merged['principal'] 
                                             < adjusted_loans_merged['principal_initial']].copy()
+principal_decreased['type'] = 4
+
+## Create final_adjusted_loans dataframe with type column
+final_adjusted_loans = pd.concat([
+    increased_loans,
+    coll_increased, 
+    coll_decreased,
+    principal_decreased
+], ignore_index=True)
+
+# Upload new_loans, closed_loans, and adjusted_loans to BigQuery
+print("📤 Uploading loan subset data to BigQuery...")
+if new_loans is not None and len(new_loans) > 0:
+    bq.update_table(new_loans, 'staging', 'new_loans_clean')
+    print("✅ Uploaded new_loans to BigQuery")
+
+if closed_loans is not None and len(closed_loans) > 0:
+    bq.update_table(closed_loans, 'staging', 'closed_loans_clean')
+    print("✅ Uploaded closed_loans to BigQuery")
+
+if latest_open_loans is not None and len(latest_open_loans) > 0:
+    bq.update_table(latest_open_loans, 'staging', 'open_loans_clean')
+    print("✅ Uploaded latest_open_loans to BigQuery")
+
+if final_adjusted_loans is not None and len(final_adjusted_loans) > 0:
+    final_adjusted_loans['id'] = range(1, len(final_adjusted_loans) + 1)
+    bq.update_table(final_adjusted_loans, 'staging', 'adjusted_loans_clean')
+    print("✅ Uploaded final_adjusted_loans to BigQuery")
+
+# Create daily dataframe
+daily_new_loans = new_loans.groupby(['timestamp_']).agg(
+    loans_opened = ('count', 'sum'),
+    borrowers = ('borrower', lambda x: x.nunique()),
+    principal = ('principal', 'sum'),
+    collateral = ('coll', 'sum'),
+    interest = ('interest', 'sum')
+).reset_index()
+
+daily_closed_loans = closed_loans.groupby(['timestamp_']).agg(
+    loans_closed = ('count', 'sum'),
+    borrowers_who_closed = ('borrower', lambda x: x.nunique())
+).reset_index()
+
+daily_new_and_closed_loans = pd.merge(daily_new_loans, daily_closed_loans, how = 'outer', on = 'timestamp_').fillna(0)
+daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']] = daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']].astype('int')      
+daily_adjusted_loans = adjusted_loans.groupby(['timestamp_']).agg(
+    loans_adjusted = ('count', 'sum'),
+    borrowers_who_adjusted = ('borrower', lambda x: x.nunique())
+).reset_index()
+
+daily_loan_data = pd.merge(daily_new_and_closed_loans, daily_adjusted_loans, how='outer', on='timestamp_').fillna(0)
+daily_loan_data[['loans_adjusted', 'borrowers_who_adjusted']] = daily_loan_data[['loans_adjusted', 'borrowers_who_adjusted']].astype(int)
+
+daily_balances = latest_loans.groupby(['timestamp_']).agg(
+    musd = ('principal', 'sum'),
+    interest = ('interest', 'sum'),
+    collateral = ('coll', 'sum')
+).reset_index()
+
+daily_balances = daily_balances.rename(
+    columns={'musd': 'net_musd', 
+             'interest': 'net_interest',
+             'collateral': 'net_coll'}
+)
+
+daily_loans_merged = pd.merge(daily_loan_data, daily_balances, how='outer', on='timestamp_')
+
+cols = {
+    'timestamp_': 'date', 
+    'principal': 'gross_musd', 
+    'collateral': 'gross_coll', 
+    'interest': 'gross_interest',
+    'borrowers_who_closed': 'closers', 
+    'borrowers_who_adjusted': 'adjusters'
+}
+
+daily_loans_merged = daily_loans_merged.rename(columns = cols)
+
+daily_musd_final = add_rolling_values(daily_loans_merged, 30, ['net_musd', 'net_interest', 'net_coll']).fillna(0)
+daily_musd_final_2 = add_cumulative_columns(daily_musd_final, ['net_musd', 'net_interest', 'net_coll'])
+daily_musd_final_3 = add_pct_change_columns(daily_musd_final_2, ['net_musd', 'net_interest', 'net_coll'], 'daily').fillna(0)
+final_daily_musd = daily_musd_final_3.replace([float('inf'), -float('inf')], 0)
+final_daily_musd['date'] = pd.to_datetime(final_daily_musd['date']).dt.strftime('%Y-%m-%d')
+
+# Upload daily loan data to BigQuery
+print("📤 Uploading daily loans data to BigQuery...")
+if final_daily_musd is not None and len(final_daily_musd) > 0:
+    final_daily_musd['id'] = range(1, len(final_daily_musd) + 1)
+    bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean')
+    print("✅ Uploaded final_daily_musd to BigQuery")
+
+# Convert integer columns that may have become floats back to integers
+integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
+for col in integer_columns:
+    if col in final_daily_musd.columns:
+        final_daily_musd[col] = final_daily_musd[col].astype(int)
+
+supabase.update_supabase('mainnet_musd_daily', final_daily_musd)
 
 ##################################
 
-# Summary dataframes
-## Compute data points
-
-# Historical/all time data
+# Create summary dataframes
 all_time_musd_borrowed = new_loans['principal'].sum() # the historical amount of MUSD taken out in loans
 all_time_musd_loans = new_loans['count'].sum() # the historical number of MUSD loans opened.
 all_time_musd_borrowers = new_loans['borrower'].nunique() # number of unique borrowers who have ever opened a loan
 all_time_closed_loans = closed_loans['count'].sum()
 all_time_adjustments = adjusted_loans['count'].sum()
 
-### Increased loans
 increase_txns = increased_loans['count'].sum()
 loans_increased = increased_loans['borrower'].nunique()
 
-### Collateral changes
 increase_coll_txns = coll_increased['count'].sum()
 decrease_coll_txns = coll_decreased['count'].sum()
 loans_with_coll_increased = coll_increased['borrower'].nunique()
 loans_with_coll_decreased = coll_decreased['borrower'].nunique()
 
-### Partial repayments
 partial_repayment_txns = principal_decreased['count'].sum()
 loans_with_partial_repayments = principal_decreased['borrower'].nunique()
 
-# the number of currently open MUSD loans
 open_loans = latest_open_loans['count'].sum()
 
-# liquidated loans
 liquidated_loans = liquidations_final['count'].sum()
 interest_liquidated = liquidations_final['interest'].sum()
 coll_liquidated = liquidations_final['coll'].sum()
@@ -216,7 +310,6 @@ TCR = latest_open_loans['coll_ratio'].mean()*100
 system_coll = latest_open_loans['coll'].sum()
 system_debt = latest_open_loans['principal'].sum() + latest_open_loans['interest'].sum()
 
-## DF with summary cumulative data
 d = {
     'all_time_musd_borrowed' : all_time_musd_borrowed, 
     'all_time_loans' : all_time_musd_loans,
@@ -313,76 +406,8 @@ h = {
 
 musd_system_health = pd.DataFrame([h])
 supabase.append_to_supabase('mainnet_musd_system_health', musd_system_health)
-# supabase.update_supabase('mainnet_musd_system_health', musd_system_health)
-
-# Daily data
-
-daily_new_loans = new_loans.groupby(['timestamp_']).agg(
-    loans_opened = ('count', 'sum'),
-    borrowers = ('borrower', lambda x: x.nunique()),
-    principal = ('principal', 'sum'),
-    collateral = ('coll', 'sum'),
-    interest = ('interest', 'sum')
-).reset_index()
-
-daily_closed_loans = closed_loans.groupby(['timestamp_']).agg(
-    loans_closed = ('count', 'sum'),
-    borrowers_who_closed = ('borrower', lambda x: x.nunique())
-).reset_index()
-
-daily_new_and_closed_loans = pd.merge(daily_new_loans, daily_closed_loans, how = 'outer', on = 'timestamp_').fillna(0)
-daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']] = daily_new_and_closed_loans[['loans_opened', 'borrowers', 'loans_closed', 'borrowers_who_closed']].astype('int')      
-daily_adjusted_loans = adjusted_loans.groupby(['timestamp_']).agg(
-    loans_adjusted = ('count', 'sum'),
-    borrowers_who_adjusted = ('borrower', lambda x: x.nunique())
-).reset_index()
-
-daily_loan_data = pd.merge(daily_new_and_closed_loans, daily_adjusted_loans, how='outer', on='timestamp_').fillna(0)
-daily_loan_data[['loans_adjusted', 'borrowers_who_adjusted']] = daily_loan_data[['loans_adjusted', 'borrowers_who_adjusted']].astype(int)
-
-daily_balances = latest_loans.groupby(['timestamp_']).agg(
-    musd = ('principal', 'sum'),
-    interest = ('interest', 'sum'),
-    collateral = ('coll', 'sum')
-).reset_index()
-
-daily_balances = daily_balances.rename(
-    columns={'musd': 'net_musd', 
-             'interest': 'net_interest',
-             'collateral': 'net_coll'}
-)
-
-daily_loans_merged = pd.merge(daily_loan_data, daily_balances, how='outer', on='timestamp_')
-
-cols = {
-    'timestamp_': 'date', 
-    'principal': 'gross_musd', 
-    'collateral': 'gross_coll', 
-    'interest': 'gross_interest',
-    'borrowers_who_closed': 'closers', 
-    'borrowers_who_adjusted': 'adjusters'
-}
-
-daily_loans_merged = daily_loans_merged.rename(columns = cols)
-
-daily_musd_final = add_rolling_values(daily_loans_merged, 30, ['net_musd', 'net_interest', 'net_coll']).fillna(0)
-daily_musd_final_2 = add_cumulative_columns(daily_musd_final, ['net_musd', 'net_interest', 'net_coll'])
-daily_musd_final_3 = add_pct_change_columns(daily_musd_final_2, ['net_musd', 'net_interest', 'net_coll'], 'daily').fillna(0)
-daily_musd_final_4 = daily_musd_final_3.replace([float('inf'), -float('inf')], 0)
-final_daily_musd = daily_musd_final_4.copy()
-final_daily_musd['date'] = pd.to_datetime(final_daily_musd['date']).dt.strftime('%Y-%m-%d')
-
-# Convert integer columns that may have become floats back to integers
-integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
-for col in integer_columns:
-    if col in final_daily_musd.columns:
-        final_daily_musd[col] = final_daily_musd[col].astype(int)
-
-supabase.update_supabase('mainnet_musd_daily', final_daily_musd)
-
 
 # raw musd token transfers data
-
 def fetch_data(endpoint: str) -> pd.DataFrame:
         """Fetch data from the specified API endpoint."""
 
@@ -410,8 +435,11 @@ def fetch_data(endpoint: str) -> pd.DataFrame:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
 
 musd_token_address = '0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186'
-
 musd_transfers = fetch_data(f'tokens/{musd_token_address}/transfers')
+
+print(musd_transfers)
+print(musd_transfers.columns)
+
 musd_transfers_short = musd_transfers[[
     'timestamp','from.hash', 'to.hash', 'type', 'method', 
     'total.value', 'tx_hash', 'block_number', 
@@ -419,13 +447,11 @@ musd_transfers_short = musd_transfers[[
     'to.is_contract', 'to.is_scam'
     ]]
 
-musd_transfers_short['timestamp'] = pd.to_datetime(
-    musd_transfers_short['timestamp']
-    ).dt.date
-
+musd_transfers_short['timestamp'] = pd.to_datetime(musd_transfers_short['timestamp']).dt.date
 format_musd_currency_columns(musd_transfers_short, ['total.value'])
-
 musd_transactions = musd_transfers_short.copy()
+
+print(musd_transactions.loc[musd_transactions['from.hash'] == '0x0000000000000000000000000000000000000000'].nunique())
 
 # get holder data
 base_url = 'http://api.explorer.mezo.org/api/v2/tokens/'
@@ -445,6 +471,8 @@ response = requests.get(url2, timeout=10)
 data2 = response.json()
 dat2 = pd.json_normalize(data2)
 musd_token_data = pd.DataFrame(dat2)
+
+print(musd_token_data.columns)
 
 musd_token = pd.merge(musd_token_data, musd_holders, how = 'cross')
 

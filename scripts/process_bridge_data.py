@@ -28,7 +28,7 @@ def main():
     """Main function to process bridge transaction data."""
     ProgressIndicators.print_ascii_bridge()
     ProgressIndicators.print_header("BRIDGE DATA PROCESSING PIPELINE")
-    
+
     try:
         # Load environment variables
         ProgressIndicators.print_step("Loading environment variables", "start")
@@ -41,8 +41,9 @@ def main():
         
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
-        bq = BigQueryClient(project_id='mezo-portal-data')
+        bq = BigQueryClient(key='GOOGLE_CLOUD_DEV_KEY', project_id='mezo-data-dev')
         if raw_data is not None and len(raw_data) > 0:
+            raw_data['id'] = range(1, len(raw_data) + 1)
             bq.update_table(raw_data, 'raw_data', 'bridge_transactions')
             ProgressIndicators.print_step("Uploaded raw bridge data to BigQuery", "success")
 
@@ -90,6 +91,18 @@ def main():
             ProgressIndicators.print_step(f"Warning: {len(missing_prices)} transactions missing USD prices", "warning")
         
         ProgressIndicators.print_step("USD price mapping completed", "success")
+
+        # Remove the 'usd' column before uploading to BigQuery
+        bridge_txns_with_usd = bridge_txns_with_usd.drop(columns=['usd'])
+        
+        # Add id column for BigQuery
+        bridge_txns_with_usd['id'] = range(1, len(bridge_txns_with_usd) + 1)
+
+        # Upload bridge transactions with USD to BigQuery staging
+        ProgressIndicators.print_step("Uploading bridge transactions with USD to BigQuery staging", "start")
+        if bridge_txns_by_token_with_usd is not None and len(raw_data) > 0:
+            bq.update_table(bridge_txns_with_usd, 'staging', 'bridge_transactions_clean')
+        ProgressIndicators.print_step("Uploaded bridge transactions with USD to BigQuery staging", "success")
         
         # Daily bridging data aggregation
         ProgressIndicators.print_step("Creating daily bridge aggregations", "start")
@@ -185,7 +198,6 @@ def main():
         autobridge_summary_df = pd.DataFrame([autobridge_summary])
         ProgressIndicators.print_step("Summary statistics calculated", "success")
         
-        # Display summary in a nice box
         ProgressIndicators.print_summary_box(
             f"{ProgressIndicators.COIN} BRIDGE SUMMARY STATISTICS {ProgressIndicators.COIN}",
             {

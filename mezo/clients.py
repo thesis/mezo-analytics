@@ -319,18 +319,18 @@ class APIClient:
             if not next_page_params:
                 break
 
-        return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-    
+        return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()    
 
 class BigQueryClient:
-    def __init__(self, project_id: str = None):
+    def __init__(self, key: str = None, project_id: str = None):
+        
         # Load and set credentials
         import json
         from google.oauth2 import service_account
         
-        credentials_json = os.getenv("GOOGLE_CLOUD_KEY")
+        credentials_json = os.getenv(key)
         if not credentials_json:
-            raise ValueError("Missing GOOGLE_CLOUD_KEY in .env")
+            raise ValueError("Missing {key} in .env")
         
         # Parse JSON credentials
         credentials_info = json.loads(credentials_json)
@@ -355,61 +355,77 @@ class BigQueryClient:
             self.client.create_dataset(dataset)
             print(f"✅ Created dataset '{dataset_id}'.")
 
-    def create_table(self, dataset_id: str, table_id: str, schema: list):
+    def create_table(self, df: pd.DataFrame, dataset_id: str, table_id: str):
+        """Create a BigQuery table from a DataFrame."""
+        table_ref = self.client.dataset(dataset_id).table(table_id)
+        
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_EMPTY,
+            autodetect=True
+        )
+        
+        job = self.client.load_table_from_dataframe(
+            df, table_ref, job_config=job_config
+        )
+        job.result()
+        print(f"✅ Created table '{table_id}' in dataset '{dataset_id}' with {len(df)} rows.")
+
+    def table_exists(self, dataset_id: str, table_id: str) -> bool:
+        """Check if a table exists in BigQuery."""
         table_ref = self.client.dataset(dataset_id).table(table_id)
         try:
             self.client.get_table(table_ref)
-            print(f"✅ Table '{table_id}' already exists in '{dataset_id}'.")
+            return True
         except NotFound:
-            table = bigquery.Table(table_ref, schema=schema)
-            self.client.create_table(table)
-            print(f"✅ Created table '{table_id}' in dataset '{dataset_id}'.")
+            return False
 
-    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str, unique_column: str = None):
+    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str):
         """
-        Append only new rows to BigQuery table based on a unique identifier column.
+        Update a BigQuery table with new data.
+        
+        - If table doesn't exist: creates the table
+        - If table exists: appends only new rows based on 'id' column comparison
         
         Args:
-            df: DataFrame to upload
-            dataset_id: BigQuery dataset ID
+            df: DataFrame to upload (must include 'id' column)
+            dataset_id: BigQuery dataset ID  
             table_id: BigQuery table ID
-            unique_column: Column name to check for duplicates (e.g., 'id', 'hash', 'timestamp')
         """
-        table_ref = self.client.dataset(dataset_id).table(table_id)
+        # Check if table exists
+        if not self.table_exists(dataset_id, table_id):
+            print(f"📋 Table {dataset_id}.{table_id} does not exist. Creating...")
+            self.create_table(df, dataset_id, table_id)
+            return
         
-        # If no unique column specified, use transaction_hash
-        if unique_column is None:
-            unique_column = 'transaction_hash'
+        # Table exists - append only new rows
+        print(f"📋 Table {dataset_id}.{table_id} exists. Checking for new rows...")
         
-        if unique_column and unique_column in df.columns:
-            # Get existing values from BigQuery for the unique column
-            try:
-                query = f"""
-                SELECT DISTINCT {unique_column}
-                FROM `{dataset_id}.{table_id}`
-                """
-                existing_values = self.client.query(query).to_dataframe()
-                existing_set = set(existing_values[unique_column].tolist())
+        try:
+            # Get existing IDs to check for duplicates
+            existing_ids_query = f"""
+            SELECT DISTINCT id
+            FROM `{dataset_id}.{table_id}`
+            """
+            existing_values = self.client.query(existing_ids_query).to_dataframe()
+            existing_ids = set(existing_values['id'].tolist()) if not existing_values.empty else set()
+            
+            # Filter out any rows with IDs that already exist
+            new_rows_mask = ~df['id'].isin(existing_ids)
+            new_df = df[new_rows_mask].copy()
+            
+            if new_df.empty:
+                print(f"✅ No new rows to upload to {dataset_id}.{table_id}")
+                return
                 
-                # Filter out rows that already exist
-                new_rows_mask = ~df[unique_column].isin(existing_set)
-                new_df = df[new_rows_mask].copy()
-                
-                if new_df.empty:
-                    print(f"✅ No new rows to upload to {dataset_id}.{table_id}")
-                    return
-                    
-                print(f"📊 Found {len(new_df)} new rows out of {len(df)} total rows")
-                
-            except Exception as e:
-                print(f"⚠️ Could not check existing data (table might be empty): {e}")
-                print(f"📤 Uploading all {len(df)} rows...")
-                new_df = df.copy()
-        else:
-            print(f"⚠️ No unique column found or specified, uploading all rows")
-            new_df = df.copy()
+            print(f"📊 Adding {len(new_df)} new rows with IDs {new_df['id'].min()}-{new_df['id'].max()}")
+            
+        except Exception as e:
+            print(f"❌ Could not check existing data: {e}")
+            print(f"❌ Skipping upload to avoid duplicates")
+            return
         
         # Upload new rows only
+        table_ref = self.client.dataset(dataset_id).table(table_id)
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND
         )

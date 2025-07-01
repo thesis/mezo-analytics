@@ -62,7 +62,7 @@ class ProgressIndicators:
     def print_ascii_bridge():
         """Print ASCII art of a bridge."""
         print("""
-    🌉 BRIDGE DATA PROCESSING 🌉
+    🌉 DATA PROCESSING 🌉
     
          /|     /|
         / |____/ |
