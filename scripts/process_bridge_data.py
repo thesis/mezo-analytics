@@ -41,7 +41,7 @@ def main():
         
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
-        bq = BigQueryClient(key='GOOGLE_CLOUD_DEV_KEY', project_id='mezo-data-dev')
+        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
         if raw_data is not None and len(raw_data) > 0:
             raw_data['id'] = range(1, len(raw_data) + 1)
             bq.update_table(raw_data, 'raw_data', 'bridge_transactions')
