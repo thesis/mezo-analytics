@@ -100,7 +100,7 @@ def main():
 
         # Upload bridge transactions with USD to BigQuery staging
         ProgressIndicators.print_step("Uploading bridge transactions with USD to BigQuery staging", "start")
-        if bridge_txns_by_token_with_usd is not None and len(raw_data) > 0:
+        if bridge_txns_with_usd is not None and len(raw_data) > 0:
             bq.update_table(bridge_txns_with_usd, 'staging', 'bridge_transactions_clean')
         ProgressIndicators.print_step("Uploaded bridge transactions with USD to BigQuery staging", "success")
         
