@@ -84,11 +84,8 @@ instance/
 docs/site/
 
 # PyBuilder
-.pybuilder/
+.pybuilder/2
 target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
 
 # IPython
 profile_default/
@@ -191,4 +188,3 @@ cython_debug/
 
 # Raw work/archives
 mezo/archive/
-notebooks

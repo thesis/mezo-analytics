@@ -10,6 +10,8 @@ from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.cloud import bigquery
 from dotenv import load_dotenv
+from web3 import Web3
+import json
 
 load_dotenv(dotenv_path='../.env', override=True)
 
@@ -63,7 +65,7 @@ class SubgraphClient:
     MUSD_TOKEN_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-token/1.0.0/gn"
     MUSD_STABILITY_POOL_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-stability-pool/1.0.0/gn"
     MUSD_TROVE_MANAGER_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn"
-
+    AUGUST_VAULT_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn"
 class SupabaseClient:
 
     def __init__(self):
@@ -420,9 +422,18 @@ class BigQueryClient:
             print(f"📊 Adding {len(new_df)} new rows with IDs {new_df['id'].min()}-{new_df['id'].max()}")
             
         except Exception as e:
-            print(f"❌ Could not check existing data: {e}")
-            print(f"❌ Skipping upload to avoid duplicates")
-            return
+            error_msg = str(e).lower()
+            if "unrecognized name: id" in error_msg or "column id does not exist" in error_msg:
+                print(f"⚠️  Table exists but missing 'id' column. Recreating table with new schema...")
+                # Delete the existing table and recreate it
+                table_ref = self.client.dataset(dataset_id).table(table_id)
+                self.client.delete_table(table_ref)
+                self.create_table(df, dataset_id, table_id)
+                return
+            else:
+                print(f"❌ Could not check existing data: {e}")
+                print(f"❌ Skipping upload to avoid duplicates")
+                return
         
         # Upload new rows only
         table_ref = self.client.dataset(dataset_id).table(table_id)
@@ -435,3 +446,22 @@ class BigQueryClient:
         )
         job.result()
         print(f"📤 Successfully uploaded {new_df.shape[0]} new rows to {dataset_id}.{table_id}")
+
+class Web3Client:
+    """A class to handle direct queries to the blockchain"""
+
+    def __init__(self, contract_name: str):
+        self.contract_name = contract_name
+        self.node = 'https://mainnet.mezo.public.validationcloud.io/'
+        self.w3 = Web3(Web3.HTTPProvider(self.node))
+
+    def load_abi(self):
+        path_name = f'mezo/smart_contracts/{self.contract_name}.json'
+        with open(path_name, "r") as file:
+            content = file.read()
+        return json.loads(content)
+
+    def load_contract(self):
+        json = self.load_abi()
+        address = Web3.to_checksum_address(json['address'])
+        return self.w3.eth.contract(address=address, abi=json['abi'])

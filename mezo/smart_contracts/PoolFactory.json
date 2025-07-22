@@ -1,0 +1,875 @@
+{
+  "address": "0x83FE469C636C4081b87bA5b3Ae9991c6Ed104248",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_implementation",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "FeeInvalid",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "FeeTooHigh",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidPool",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotFeeManager",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotPauser",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotVoter",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "PoolAlreadyExists",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "SameAddress",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroAddress",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ZeroFee",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token0",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token1",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "bool",
+          "name": "stable",
+          "type": "bool"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "PoolCreated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "fee",
+          "type": "uint256"
+        }
+      ],
+      "name": "SetCustomFee",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "feeManager",
+          "type": "address"
+        }
+      ],
+      "name": "SetFeeManager",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "state",
+          "type": "bool"
+        }
+      ],
+      "name": "SetPauseState",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "pauser",
+          "type": "address"
+        }
+      ],
+      "name": "SetPauser",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "voter",
+          "type": "address"
+        }
+      ],
+      "name": "SetVoter",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "MAX_FEE",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "ZERO_FEE_INDICATOR",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "allPools",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "allPoolsLength",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "tokenA",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenB",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "stable",
+          "type": "bool"
+        }
+      ],
+      "name": "createPool",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "tokenA",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenB",
+          "type": "address"
+        },
+        {
+          "internalType": "uint24",
+          "name": "fee",
+          "type": "uint24"
+        }
+      ],
+      "name": "createPool",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "customFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "feeManager",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "_stable",
+          "type": "bool"
+        }
+      ],
+      "name": "getFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "tokenA",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenB",
+          "type": "address"
+        },
+        {
+          "internalType": "uint24",
+          "name": "fee",
+          "type": "uint24"
+        }
+      ],
+      "name": "getPool",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "tokenA",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenB",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "stable",
+          "type": "bool"
+        }
+      ],
+      "name": "getPool",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "implementation",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "isPaused",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        }
+      ],
+      "name": "isPool",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pauser",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "fee",
+          "type": "uint256"
+        }
+      ],
+      "name": "setCustomFee",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bool",
+          "name": "_stable",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_fee",
+          "type": "uint256"
+        }
+      ],
+      "name": "setFee",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_feeManager",
+          "type": "address"
+        }
+      ],
+      "name": "setFeeManager",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bool",
+          "name": "_state",
+          "type": "bool"
+        }
+      ],
+      "name": "setPauseState",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_pauser",
+          "type": "address"
+        }
+      ],
+      "name": "setPauser",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_voter",
+          "type": "address"
+        }
+      ],
+      "name": "setVoter",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "stableFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "volatileFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "voter",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0xecccfbd75acd2c8953bd89152e015f2b1d575d3de49d1223db4d70f5308cfc18",
+  "receipt": {
+    "to": null,
+    "from": "0x123694886DBf5Ac94DDA07135349534536D14cAf",
+    "contractAddress": "0x83FE469C636C4081b87bA5b3Ae9991c6Ed104248",
+    "transactionIndex": 0,
+    "gasUsed": "926104",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0x7374dada2624b439c6e49a42e61de794c6d4af310957a3c0a118d3967ee2e7dd",
+    "transactionHash": "0xecccfbd75acd2c8953bd89152e015f2b1d575d3de49d1223db4d70f5308cfc18",
+    "logs": [],
+    "blockNumber": 199767,
+    "cumulativeGasUsed": "926104",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": [
+    "0xee8287b903cbBa2DEa6a9CfDa296A05ADA1A6cEF"
+  ],
+  "numDeployments": 1,
+  "solcInputHash": "2799ce436a196df11f1ef308a2a7561c",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.24+commit.e11b9ed9\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_implementation\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"FeeInvalid\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"FeeTooHigh\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidPool\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"NotFeeManager\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"NotPauser\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"NotVoter\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"PoolAlreadyExists\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"SameAddress\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroAddress\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroFee\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"token0\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"token1\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"bool\",\"name\":\"stable\",\"type\":\"bool\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"PoolCreated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"fee\",\"type\":\"uint256\"}],\"name\":\"SetCustomFee\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"feeManager\",\"type\":\"address\"}],\"name\":\"SetFeeManager\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"state\",\"type\":\"bool\"}],\"name\":\"SetPauseState\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"pauser\",\"type\":\"address\"}],\"name\":\"SetPauser\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"voter\",\"type\":\"address\"}],\"name\":\"SetVoter\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"MAX_FEE\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"ZERO_FEE_INDICATOR\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"allPools\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"allPoolsLength\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokenA\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"tokenB\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"stable\",\"type\":\"bool\"}],\"name\":\"createPool\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokenA\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"tokenB\",\"type\":\"address\"},{\"internalType\":\"uint24\",\"name\":\"fee\",\"type\":\"uint24\"}],\"name\":\"createPool\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"customFee\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"feeManager\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"_stable\",\"type\":\"bool\"}],\"name\":\"getFee\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokenA\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"tokenB\",\"type\":\"address\"},{\"internalType\":\"uint24\",\"name\":\"fee\",\"type\":\"uint24\"}],\"name\":\"getPool\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokenA\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"tokenB\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"stable\",\"type\":\"bool\"}],\"name\":\"getPool\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"implementation\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"isPaused\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"}],\"name\":\"isPool\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"pauser\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"fee\",\"type\":\"uint256\"}],\"name\":\"setCustomFee\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bool\",\"name\":\"_stable\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"_fee\",\"type\":\"uint256\"}],\"name\":\"setFee\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_feeManager\",\"type\":\"address\"}],\"name\":\"setFeeManager\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bool\",\"name\":\"_state\",\"type\":\"bool\"}],\"name\":\"setPauseState\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_pauser\",\"type\":\"address\"}],\"name\":\"setPauser\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_voter\",\"type\":\"address\"}],\"name\":\"setVoter\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"stableFee\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"volatileFee\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"voter\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{\"createPool(address,address,bool)\":{\"details\":\"token order does not matter\",\"params\":{\"stable\":\".\",\"tokenA\":\".\",\"tokenB\":\".\"}},\"createPool(address,address,uint24)\":{\"details\":\"fee is converted to stable booleantoken order does not matter\",\"params\":{\"fee\":\"1 if stable, 0 if volatile, else revert\",\"tokenA\":\".\",\"tokenB\":\".\"}},\"getPool(address,address,bool)\":{\"params\":{\"stable\":\"True if stable, false if volatile\",\"tokenA\":\".\",\"tokenB\":\".\"}},\"getPool(address,address,uint24)\":{\"details\":\"fee is converted to stable boolean.\",\"params\":{\"fee\":\"1 if stable, 0 if volatile, else returns address(0)\",\"tokenA\":\".\",\"tokenB\":\".\"}},\"isPool(address)\":{\"params\":{\"\":\".\"}},\"setCustomFee(address,uint256)\":{\"details\":\"A custom fee of zero means the default fee will be used.\"},\"setFee(bool,uint256)\":{\"details\":\"Throws if higher than maximum fee.      Throws if fee is zero.\",\"params\":{\"_fee\":\".\",\"_stable\":\"Stable or volatile pool.\"}},\"setVoter(address)\":{\"details\":\"Only called once to set to Voter.sol - Voter does not have a function      to call this contract method, so once set it's immutable.      This also follows convention of setVoterAndDistributor() in VotingEscrow.sol\",\"params\":{\"_voter\":\".\"}}},\"stateVariables\":{\"voter\":{\"details\":\"used to change the name/symbol of the pool by calling emergencyCouncil\"}},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"allPoolsLength()\":{\"notice\":\"returns the number of pools created from this factory\"},\"createPool(address,address,bool)\":{\"notice\":\"Create a pool given two tokens and if they're stable/volatile\"},\"createPool(address,address,uint24)\":{\"notice\":\"Support for v3-style pools which wraps around createPool(tokena,tokenB,stable)\"},\"getFee(address,bool)\":{\"notice\":\"Returns fee for a pool, as custom fees are possible.\"},\"getPool(address,address,bool)\":{\"notice\":\"Return address of pool created by this factory\"},\"getPool(address,address,uint24)\":{\"notice\":\"Support for v3-style pools which wraps around getPool(tokenA,tokenB,stable)\"},\"isPool(address)\":{\"notice\":\"Is a valid pool created by this factory.\"},\"setCustomFee(address,uint256)\":{\"notice\":\"Set overriding fee for a pool from the default\"},\"setFee(bool,uint256)\":{\"notice\":\"Set default fee for stable and volatile pools.\"}},\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/factories/PoolFactory.sol\":\"PoolFactory\"},\"evmVersion\":\"london\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":100},\"remappings\":[]},\"sources\":{\"@openzeppelin/contracts/proxy/Clones.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\n// OpenZeppelin Contracts (last updated v4.9.0) (proxy/Clones.sol)\\n\\npragma solidity ^0.8.0;\\n\\n/**\\n * @dev https://eips.ethereum.org/EIPS/eip-1167[EIP 1167] is a standard for\\n * deploying minimal proxy contracts, also known as \\\"clones\\\".\\n *\\n * > To simply and cheaply clone contract functionality in an immutable way, this standard specifies\\n * > a minimal bytecode implementation that delegates all calls to a known, fixed address.\\n *\\n * The library includes functions to deploy a proxy using either `create` (traditional deployment) or `create2`\\n * (salted deterministic deployment). It also includes functions to predict the addresses of clones deployed using the\\n * deterministic method.\\n *\\n * _Available since v3.4._\\n */\\nlibrary Clones {\\n    /**\\n     * @dev Deploys and returns the address of a clone that mimics the behaviour of `implementation`.\\n     *\\n     * This function uses the create opcode, which should never revert.\\n     */\\n    function clone(address implementation) internal returns (address instance) {\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            // Cleans the upper 96 bits of the `implementation` word, then packs the first 3 bytes\\n            // of the `implementation` address with the bytecode before the address.\\n            mstore(0x00, or(shr(0xe8, shl(0x60, implementation)), 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000))\\n            // Packs the remaining 17 bytes of `implementation` with the bytecode after the address.\\n            mstore(0x20, or(shl(0x78, implementation), 0x5af43d82803e903d91602b57fd5bf3))\\n            instance := create(0, 0x09, 0x37)\\n        }\\n        require(instance != address(0), \\\"ERC1167: create failed\\\");\\n    }\\n\\n    /**\\n     * @dev Deploys and returns the address of a clone that mimics the behaviour of `implementation`.\\n     *\\n     * This function uses the create2 opcode and a `salt` to deterministically deploy\\n     * the clone. Using the same `implementation` and `salt` multiple time will revert, since\\n     * the clones cannot be deployed twice at the same address.\\n     */\\n    function cloneDeterministic(address implementation, bytes32 salt) internal returns (address instance) {\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            // Cleans the upper 96 bits of the `implementation` word, then packs the first 3 bytes\\n            // of the `implementation` address with the bytecode before the address.\\n            mstore(0x00, or(shr(0xe8, shl(0x60, implementation)), 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000))\\n            // Packs the remaining 17 bytes of `implementation` with the bytecode after the address.\\n            mstore(0x20, or(shl(0x78, implementation), 0x5af43d82803e903d91602b57fd5bf3))\\n            instance := create2(0, 0x09, 0x37, salt)\\n        }\\n        require(instance != address(0), \\\"ERC1167: create2 failed\\\");\\n    }\\n\\n    /**\\n     * @dev Computes the address of a clone deployed using {Clones-cloneDeterministic}.\\n     */\\n    function predictDeterministicAddress(\\n        address implementation,\\n        bytes32 salt,\\n        address deployer\\n    ) internal pure returns (address predicted) {\\n        /// @solidity memory-safe-assembly\\n        assembly {\\n            let ptr := mload(0x40)\\n            mstore(add(ptr, 0x38), deployer)\\n            mstore(add(ptr, 0x24), 0x5af43d82803e903d91602b57fd5bf3ff)\\n            mstore(add(ptr, 0x14), implementation)\\n            mstore(ptr, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73)\\n            mstore(add(ptr, 0x58), salt)\\n            mstore(add(ptr, 0x78), keccak256(add(ptr, 0x0c), 0x37))\\n            predicted := keccak256(add(ptr, 0x43), 0x55)\\n        }\\n    }\\n\\n    /**\\n     * @dev Computes the address of a clone deployed using {Clones-cloneDeterministic}.\\n     */\\n    function predictDeterministicAddress(\\n        address implementation,\\n        bytes32 salt\\n    ) internal view returns (address predicted) {\\n        return predictDeterministicAddress(implementation, salt, address(this));\\n    }\\n}\\n\",\"keccak256\":\"0x01f055f5c26ba25d7f83e9aa9ba877fbea4d0bf22227de046ea67494bc932999\",\"license\":\"MIT\"},\"contracts/factories/PoolFactory.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\npragma solidity 0.8.24;\\n\\nimport {IPoolFactory} from \\\"../interfaces/factories/IPoolFactory.sol\\\";\\nimport {IPool} from \\\"../interfaces/IPool.sol\\\";\\nimport {Clones} from \\\"@openzeppelin/contracts/proxy/Clones.sol\\\";\\n\\ncontract PoolFactory is IPoolFactory {\\n    address public immutable implementation;\\n\\n    bool public isPaused;\\n    address public pauser;\\n\\n    uint256 public stableFee;\\n    uint256 public volatileFee;\\n    uint256 public constant MAX_FEE = 300; // 3%\\n    // Override to indicate there is custom 0% fee - as a 0 value in the customFee mapping indicates\\n    // that no custom fee rate has been set\\n    uint256 public constant ZERO_FEE_INDICATOR = 420;\\n    address public feeManager;\\n\\n    /// @dev used to change the name/symbol of the pool by calling emergencyCouncil\\n    address public voter;\\n\\n    mapping(address => mapping(address => mapping(bool => address)))\\n        private _getPool;\\n    address[] public allPools;\\n    mapping(address => bool) private _isPool; // simplified check if its a pool, given that `stable` flag might not be available in peripherals\\n    mapping(address => uint256) public customFee; // override for custom fees\\n\\n    address internal _temp0;\\n    address internal _temp1;\\n    bool internal _temp;\\n\\n    constructor(address _implementation) {\\n        implementation = _implementation;\\n        voter = msg.sender;\\n        pauser = msg.sender;\\n        feeManager = msg.sender;\\n        isPaused = false;\\n        stableFee = 5; // 0.05%\\n        volatileFee = 30; // 0.3%\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function allPoolsLength() external view returns (uint256) {\\n        return allPools.length;\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function getPool(\\n        address tokenA,\\n        address tokenB,\\n        uint24 fee\\n    ) external view returns (address) {\\n        return\\n            fee > 1\\n                ? address(0)\\n                : fee == 1\\n                    ? _getPool[tokenA][tokenB][true]\\n                    : _getPool[tokenA][tokenB][false];\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function getPool(\\n        address tokenA,\\n        address tokenB,\\n        bool stable\\n    ) external view returns (address) {\\n        return _getPool[tokenA][tokenB][stable];\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function isPool(address pool) external view returns (bool) {\\n        return _isPool[pool];\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function setVoter(address _voter) external {\\n        if (msg.sender != voter) revert NotVoter();\\n        voter = _voter;\\n        emit SetVoter(_voter);\\n    }\\n\\n    function setPauser(address _pauser) external {\\n        if (msg.sender != pauser) revert NotPauser();\\n        if (_pauser == address(0)) revert ZeroAddress();\\n        pauser = _pauser;\\n        emit SetPauser(_pauser);\\n    }\\n\\n    function setPauseState(bool _state) external {\\n        if (msg.sender != pauser) revert NotPauser();\\n        isPaused = _state;\\n        emit SetPauseState(_state);\\n    }\\n\\n    function setFeeManager(address _feeManager) external {\\n        if (msg.sender != feeManager) revert NotFeeManager();\\n        if (_feeManager == address(0)) revert ZeroAddress();\\n        feeManager = _feeManager;\\n        emit SetFeeManager(_feeManager);\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function setFee(bool _stable, uint256 _fee) external {\\n        if (msg.sender != feeManager) revert NotFeeManager();\\n        if (_fee > MAX_FEE) revert FeeTooHigh();\\n        if (_fee == 0) revert ZeroFee();\\n        if (_stable) {\\n            stableFee = _fee;\\n        } else {\\n            volatileFee = _fee;\\n        }\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function setCustomFee(address pool, uint256 fee) external {\\n        if (msg.sender != feeManager) revert NotFeeManager();\\n        if (fee > MAX_FEE && fee != ZERO_FEE_INDICATOR) revert FeeTooHigh();\\n        if (!_isPool[pool]) revert InvalidPool();\\n\\n        customFee[pool] = fee;\\n        emit SetCustomFee(pool, fee);\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function getFee(address pool, bool _stable) public view returns (uint256) {\\n        uint256 fee = customFee[pool];\\n        return\\n            fee == ZERO_FEE_INDICATOR\\n                ? 0\\n                : fee != 0\\n                    ? fee\\n                    : _stable\\n                        ? stableFee\\n                        : volatileFee;\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function createPool(\\n        address tokenA,\\n        address tokenB,\\n        uint24 fee\\n    ) external returns (address pool) {\\n        if (fee > 1) revert FeeInvalid();\\n        bool stable = fee == 1;\\n        return createPool(tokenA, tokenB, stable);\\n    }\\n\\n    /// @inheritdoc IPoolFactory\\n    function createPool(\\n        address tokenA,\\n        address tokenB,\\n        bool stable\\n    ) public returns (address pool) {\\n        if (tokenA == tokenB) revert SameAddress();\\n        (address token0, address token1) = tokenA < tokenB\\n            ? (tokenA, tokenB)\\n            : (tokenB, tokenA);\\n        if (token0 == address(0)) revert ZeroAddress();\\n        if (_getPool[token0][token1][stable] != address(0))\\n            revert PoolAlreadyExists();\\n        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable)); // salt includes stable as well, 3 parameters\\n        pool = Clones.cloneDeterministic(implementation, salt);\\n        IPool(pool).initialize(token0, token1, stable);\\n        _getPool[token0][token1][stable] = pool;\\n        _getPool[token1][token0][stable] = pool; // populate mapping in the reverse direction\\n        allPools.push(pool);\\n        _isPool[pool] = true;\\n        emit PoolCreated(token0, token1, stable, pool, allPools.length);\\n    }\\n}\\n\",\"keccak256\":\"0x6a0db5caac6c7ff024640f2e7ab7e068184d7281743eb23b77bde03a55171f77\",\"license\":\"MIT\"},\"contracts/interfaces/IPool.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\npragma solidity 0.8.24;\\n\\ninterface IPool {\\n    error DepositsNotEqual();\\n    error BelowMinimumK();\\n    error FactoryAlreadySet();\\n    error InsufficientLiquidity();\\n    error InsufficientLiquidityMinted();\\n    error InsufficientLiquidityBurned();\\n    error InsufficientOutputAmount();\\n    error InsufficientInputAmount();\\n    error IsPaused();\\n    error InvalidTo();\\n    error K();\\n    error NotEmergencyCouncil();\\n\\n    event Fees(address indexed sender, uint256 amount0, uint256 amount1);\\n    event Mint(address indexed sender, uint256 amount0, uint256 amount1);\\n    event Burn(\\n        address indexed sender,\\n        address indexed to,\\n        uint256 amount0,\\n        uint256 amount1\\n    );\\n    event Swap(\\n        address indexed sender,\\n        address indexed to,\\n        uint256 amount0In,\\n        uint256 amount1In,\\n        uint256 amount0Out,\\n        uint256 amount1Out\\n    );\\n    event Sync(uint256 reserve0, uint256 reserve1);\\n    event Claim(\\n        address indexed sender,\\n        address indexed recipient,\\n        uint256 amount0,\\n        uint256 amount1\\n    );\\n\\n    // Struct to capture time period observations every 30 minutes, used for local oracles\\n    struct Observation {\\n        uint256 timestamp;\\n        uint256 reserve0Cumulative;\\n        uint256 reserve1Cumulative;\\n    }\\n\\n    /// @notice Returns the decimal (dec), reserves (r), stable (st), and tokens (t) of token0 and token1\\n    function metadata()\\n        external\\n        view\\n        returns (\\n            uint256 dec0,\\n            uint256 dec1,\\n            uint256 r0,\\n            uint256 r1,\\n            bool st,\\n            address t0,\\n            address t1\\n        );\\n\\n    /// @notice Claim accumulated but unclaimed fees (claimable0 and claimable1)\\n    function claimFees() external returns (uint256, uint256);\\n\\n    /// @notice Returns [token0, token1]\\n    function tokens() external view returns (address, address);\\n\\n    /// @notice Address of token in the pool with the lower address value\\n    function token0() external view returns (address);\\n\\n    /// @notice Address of token in the pool with the higher address value\\n    function token1() external view returns (address);\\n\\n    /// @notice Address of linked PoolFees.sol\\n    function poolFees() external view returns (address);\\n\\n    /// @notice Address of PoolFactory that created this contract\\n    function factory() external view returns (address);\\n\\n    /// @notice Capture oracle reading every 30 minutes (1800 seconds)\\n    function periodSize() external view returns (uint256);\\n\\n    /// @notice Amount of token0 in pool\\n    function reserve0() external view returns (uint256);\\n\\n    /// @notice Amount of token1 in pool\\n    function reserve1() external view returns (uint256);\\n\\n    /// @notice Timestamp of last update to pool\\n    function blockTimestampLast() external view returns (uint256);\\n\\n    /// @notice Cumulative of reserve0 factoring in time elapsed\\n    function reserve0CumulativeLast() external view returns (uint256);\\n\\n    /// @notice Cumulative of reserve1 factoring in time elapsed\\n    function reserve1CumulativeLast() external view returns (uint256);\\n\\n    /// @notice Accumulated fees of token0 (global)\\n    function index0() external view returns (uint256);\\n\\n    /// @notice Accumulated fees of token1 (global)\\n    function index1() external view returns (uint256);\\n\\n    /// @notice Get an LP's relative index0 to index0\\n    function supplyIndex0(address) external view returns (uint256);\\n\\n    /// @notice Get an LP's relative index1 to index1\\n    function supplyIndex1(address) external view returns (uint256);\\n\\n    /// @notice Amount of unclaimed, but claimable tokens from fees of token0 for an LP\\n    function claimable0(address) external view returns (uint256);\\n\\n    /// @notice Amount of unclaimed, but claimable tokens from fees of token1 for an LP\\n    function claimable1(address) external view returns (uint256);\\n\\n    /// @notice Returns the value of K in the Pool, based on its reserves.\\n    function getK() external returns (uint256);\\n\\n    /// @notice Set pool name\\n    ///         Only callable by Voter.emergencyCouncil()\\n    /// @param __name String of new name\\n    function setName(string calldata __name) external;\\n\\n    /// @notice Set pool symbol\\n    ///         Only callable by Voter.emergencyCouncil()\\n    /// @param __symbol String of new symbol\\n    function setSymbol(string calldata __symbol) external;\\n\\n    /// @notice Get the number of observations recorded\\n    function observationLength() external view returns (uint256);\\n\\n    /// @notice Get the value of the most recent observation\\n    function lastObservation() external view returns (Observation memory);\\n\\n    /// @notice True if pool is stable, false if volatile\\n    function stable() external view returns (bool);\\n\\n    /// @notice Produces the cumulative price using counterfactuals to save gas and avoid a call to sync.\\n    function currentCumulativePrices()\\n        external\\n        view\\n        returns (\\n            uint256 reserve0Cumulative,\\n            uint256 reserve1Cumulative,\\n            uint256 blockTimestamp\\n        );\\n\\n    /// @notice Provides twap price with user configured granularity, up to the full window size\\n    /// @param tokenIn .\\n    /// @param amountIn .\\n    /// @param granularity .\\n    /// @return amountOut .\\n    function quote(\\n        address tokenIn,\\n        uint256 amountIn,\\n        uint256 granularity\\n    ) external view returns (uint256 amountOut);\\n\\n    /// @notice Returns a memory set of TWAP prices\\n    ///         Same as calling sample(tokenIn, amountIn, points, 1)\\n    /// @param tokenIn .\\n    /// @param amountIn .\\n    /// @param points Number of points to return\\n    /// @return Array of TWAP prices\\n    function prices(\\n        address tokenIn,\\n        uint256 amountIn,\\n        uint256 points\\n    ) external view returns (uint256[] memory);\\n\\n    /// @notice Same as prices with with an additional window argument.\\n    ///         Window = 2 means 2 * 30min (or 1 hr) between observations\\n    /// @param tokenIn .\\n    /// @param amountIn .\\n    /// @param points .\\n    /// @param window .\\n    /// @return Array of TWAP prices\\n    function sample(\\n        address tokenIn,\\n        uint256 amountIn,\\n        uint256 points,\\n        uint256 window\\n    ) external view returns (uint256[] memory);\\n\\n    /// @notice This low-level function should be called from a contract which performs important safety checks\\n    /// @param amount0Out   Amount of token0 to send to `to`\\n    /// @param amount1Out   Amount of token1 to send to `to`\\n    /// @param to           Address to receive the swapped output\\n    /// @param data         Additional calldata for flashloans\\n    function swap(\\n        uint256 amount0Out,\\n        uint256 amount1Out,\\n        address to,\\n        bytes calldata data\\n    ) external;\\n\\n    /// @notice This low-level function should be called from a contract which performs important safety checks\\n    ///         standard uniswap v2 implementation\\n    /// @param to Address to receive token0 and token1 from burning the pool token\\n    /// @return amount0 Amount of token0 returned\\n    /// @return amount1 Amount of token1 returned\\n    function burn(\\n        address to\\n    ) external returns (uint256 amount0, uint256 amount1);\\n\\n    /// @notice This low-level function should be called by addLiquidity functions in Router.sol, which performs important safety checks\\n    ///         standard uniswap v2 implementation\\n    /// @param to           Address to receive the minted LP token\\n    /// @return liquidity   Amount of LP token minted\\n    function mint(address to) external returns (uint256 liquidity);\\n\\n    /// @notice Update reserves and, on the first call per block, price accumulators\\n    /// @return _reserve0 .\\n    /// @return _reserve1 .\\n    /// @return _blockTimestampLast .\\n    function getReserves()\\n        external\\n        view\\n        returns (\\n            uint256 _reserve0,\\n            uint256 _reserve1,\\n            uint256 _blockTimestampLast\\n        );\\n\\n    /// @notice Get the amount of tokenOut given the amount of tokenIn\\n    /// @param amountIn Amount of token in\\n    /// @param tokenIn  Address of token\\n    /// @return Amount out\\n    function getAmountOut(\\n        uint256 amountIn,\\n        address tokenIn\\n    ) external view returns (uint256);\\n\\n    /// @notice Force balances to match reserves\\n    /// @param to Address to receive any skimmed rewards\\n    function skim(address to) external;\\n\\n    /// @notice Force reserves to match balances\\n    function sync() external;\\n\\n    /// @notice Called on pool creation by PoolFactory\\n    /// @param _token0 Address of token0\\n    /// @param _token1 Address of token1\\n    /// @param _stable True if stable, false if volatile\\n    function initialize(\\n        address _token0,\\n        address _token1,\\n        bool _stable\\n    ) external;\\n}\\n\",\"keccak256\":\"0xab6106cba22c97814b1d929daac67a6d3f261ee38fdc8edb040892ef4daae752\",\"license\":\"MIT\"},\"contracts/interfaces/factories/IPoolFactory.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\npragma solidity 0.8.24;\\n\\ninterface IPoolFactory {\\n    event SetFeeManager(address feeManager);\\n    event SetPauser(address pauser);\\n    event SetPauseState(bool state);\\n    event SetVoter(address voter);\\n    event PoolCreated(\\n        address indexed token0,\\n        address indexed token1,\\n        bool indexed stable,\\n        address pool,\\n        uint256\\n    );\\n    event SetCustomFee(address indexed pool, uint256 fee);\\n\\n    error FeeInvalid();\\n    error FeeTooHigh();\\n    error InvalidPool();\\n    error NotFeeManager();\\n    error NotPauser();\\n    error NotVoter();\\n    error PoolAlreadyExists();\\n    error SameAddress();\\n    error ZeroFee();\\n    error ZeroAddress();\\n\\n    /// @notice returns the number of pools created from this factory\\n    function allPoolsLength() external view returns (uint256);\\n\\n    /// @notice Is a valid pool created by this factory.\\n    /// @param .\\n    function isPool(address pool) external view returns (bool);\\n\\n    /// @notice Return address of pool created by this factory\\n    /// @param tokenA .\\n    /// @param tokenB .\\n    /// @param stable True if stable, false if volatile\\n    function getPool(\\n        address tokenA,\\n        address tokenB,\\n        bool stable\\n    ) external view returns (address);\\n\\n    /// @notice Support for v3-style pools which wraps around getPool(tokenA,tokenB,stable)\\n    /// @dev fee is converted to stable boolean.\\n    /// @param tokenA .\\n    /// @param tokenB .\\n    /// @param fee  1 if stable, 0 if volatile, else returns address(0)\\n    function getPool(\\n        address tokenA,\\n        address tokenB,\\n        uint24 fee\\n    ) external view returns (address);\\n\\n    /// @dev Only called once to set to Voter.sol - Voter does not have a function\\n    ///      to call this contract method, so once set it's immutable.\\n    ///      This also follows convention of setVoterAndDistributor() in VotingEscrow.sol\\n    /// @param _voter .\\n    function setVoter(address _voter) external;\\n\\n    function setPauser(address _pauser) external;\\n\\n    function setPauseState(bool _state) external;\\n\\n    function setFeeManager(address _feeManager) external;\\n\\n    /// @notice Set default fee for stable and volatile pools.\\n    /// @dev Throws if higher than maximum fee.\\n    ///      Throws if fee is zero.\\n    /// @param _stable Stable or volatile pool.\\n    /// @param _fee .\\n    function setFee(bool _stable, uint256 _fee) external;\\n\\n    /// @notice Set overriding fee for a pool from the default\\n    /// @dev A custom fee of zero means the default fee will be used.\\n    function setCustomFee(address _pool, uint256 _fee) external;\\n\\n    /// @notice Returns fee for a pool, as custom fees are possible.\\n    function getFee(\\n        address _pool,\\n        bool _stable\\n    ) external view returns (uint256);\\n\\n    /// @notice Create a pool given two tokens and if they're stable/volatile\\n    /// @dev token order does not matter\\n    /// @param tokenA .\\n    /// @param tokenB .\\n    /// @param stable .\\n    function createPool(\\n        address tokenA,\\n        address tokenB,\\n        bool stable\\n    ) external returns (address pool);\\n\\n    /// @notice Support for v3-style pools which wraps around createPool(tokena,tokenB,stable)\\n    /// @dev fee is converted to stable boolean\\n    /// @dev token order does not matter\\n    /// @param tokenA .\\n    /// @param tokenB .\\n    /// @param fee 1 if stable, 0 if volatile, else revert\\n    function createPool(\\n        address tokenA,\\n        address tokenB,\\n        uint24 fee\\n    ) external returns (address pool);\\n\\n    function isPaused() external view returns (bool);\\n\\n    function voter() external view returns (address);\\n\\n    function implementation() external view returns (address);\\n}\\n\",\"keccak256\":\"0xea49aa44929840f624d1c24ae46d43923251c6b763222d030f2d6be43c82125d\",\"license\":\"MIT\"}},\"version\":1}",
+  "bytecode": "0x60a060405234801561001057600080fd5b50604051610e99380380610e9983398101604081905261002f9161008c565b6001600160a01b031660805260048054336001600160a01b03199182168117909255600080546003805490931684179092556001600160a81b031990911661010090920260ff19169190911790556005600155601e6002556100bc565b60006020828403121561009e57600080fd5b81516001600160a01b03811681146100b557600080fd5b9392505050565b608051610dbb6100de6000396000818161028401526106000152610dbb6000f3fe608060405234801561001057600080fd5b50600436106101585760003560e01c80635c60da1b116100c3578063cc56b2c51161007c578063cc56b2c51461032b578063cdb88ad11461033e578063d0fb020314610351578063d49466a814610364578063e1f76b4414610377578063efde4e641461038a57600080fd5b80635c60da1b1461027f57806379bc57d5146102a65780639fd0506d146102ea578063a167129514610302578063b187bd2614610315578063bc063e1a1461032257600080fd5b806346c96aac1161011557806346c96aac146101e1578063472d35b9146101f45780634bc2a657146102075780634d419abc1461021a5780635084ed031461023a5780635b16ebb71461024357600080fd5b80631698ee821461015d5780632d88af4a1461018657806336bf95a01461019b57806338c55d46146101ae57806340bbd775146101c557806341d1de97146101ce575b600080fd5b61017061016b366004610c00565b610392565b60405161017d9190610c4f565b60405180910390f35b610199610194366004610c63565b610424565b005b6101706101a9366004610c95565b6104d6565b6101b76101a481565b60405190815260200161017d565b6101b760015481565b6101706101dc366004610cd8565b610795565b600454610170906001600160a01b031681565b610199610202366004610c63565b6107bf565b610199610215366004610c63565b61085c565b6101b7610228366004610c63565b60086020526000908152604090205481565b6101b760025481565b61026f610251366004610c63565b6001600160a01b031660009081526007602052604090205460ff1690565b604051901515815260200161017d565b6101707f000000000000000000000000000000000000000000000000000000000000000081565b6101706102b4366004610c95565b6001600160a01b039283166000908152600560209081526040808320948616835293815283822092151582529190915220541690565b6000546101709061010090046001600160a01b031681565b610170610310366004610c00565b6108d2565b60005461026f9060ff1681565b6101b761012c81565b6101b7610339366004610cf1565b610918565b61019961034c366004610d24565b61096a565b600354610170906001600160a01b031681565b610199610372366004610d3f565b6109db565b610199610385366004610d69565b610ac8565b6006546101b7565b600060018262ffffff1611610419578162ffffff166001146103e3576001600160a01b038085166000908152600560209081526040808320878516845282528083208380529091529020541661041c565b6001600160a01b03808516600090815260056020908152604080832087851684528252808320600184529091529020541661041c565b60005b949350505050565b60005461010090046001600160a01b031633146104545760405163492f678160e01b815260040160405180910390fd5b6001600160a01b03811661047b5760405163d92e233d60e01b815260040160405180910390fd5b60008054610100600160a81b0319166101006001600160a01b038416021790556040517fe02efb9e8f0fc21546730ab32d594f62d586e1bbb15bb5045edd0b1878a77b35906104cb908390610c4f565b60405180910390a150565b6000826001600160a01b0316846001600160a01b03160361050a5760405163367558c360e01b815260040160405180910390fd5b600080846001600160a01b0316866001600160a01b03161061052d578486610530565b85855b90925090506001600160a01b03821661055c5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b03828116600090815260056020908152604080832085851684528252808320881515845290915290205416156105ac57604051630188c99160e11b815260040160405180910390fd5b6040516bffffffffffffffffffffffff19606084811b8216602084015283901b16603482015284151560f81b60488201526000906049016040516020818303038152906040528051906020012090506106257f000000000000000000000000000000000000000000000000000000000000000082610b49565b604051631c9776b560e31b81526001600160a01b038581166004830152848116602483015287151560448301529195509085169063e4bbb5a890606401600060405180830381600087803b15801561067c57600080fd5b505af1158015610690573d6000803e3d6000fd5b505050506001600160a01b0383811660008181526005602081815260408084208887168086529083528185208c15158087529084528286208054988d166001600160a01b0319998a16811790915582875294845282862087875284528286208187528452828620805489168617905560068054600181810183557ff652222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d3f9091018054909a1687179099558587526007855295839020805460ff191690981790975593548151938452918301919091529192917f2128d88d14c80cb081c1252a5acff7a264671bf199ce226b53788fb26065005e910160405180910390a45050509392505050565b600681815481106107a557600080fd5b6000918252602090912001546001600160a01b0316905081565b6003546001600160a01b031633146107ea5760405163f5d267eb60e01b815260040160405180910390fd5b6001600160a01b0381166108115760405163d92e233d60e01b815260040160405180910390fd5b600380546001600160a01b0319166001600160a01b0383161790556040517f5d0517e3a4eabea892d9750138cd21d4a6cf3b935b43d0598df7055f463819b2906104cb908390610c4f565b6004546001600160a01b031633146108875760405163c18384c160e01b815260040160405180910390fd5b600480546001600160a01b0319166001600160a01b0383161790556040517fc6ff127433b785c51da9ae4088ee184c909b1a55b9afd82ae6c64224d3bc15d2906104cb908390610c4f565b600060018262ffffff1611156108fb576040516352dadcf960e01b815260040160405180910390fd5b600162ffffff83161461090f8585836104d6565b95945050505050565b6001600160a01b0382166000908152600860205260408120546101a4811461095d5780600003610957578261094f57600254610960565b600154610960565b80610960565b60005b9150505b92915050565b60005461010090046001600160a01b0316331461099a5760405163492f678160e01b815260040160405180910390fd5b6000805460ff19168215159081179091556040519081527f0d76538efc408318a051137c2720a9e82902acdbd46b802d488b74ca3a09a116906020016104cb565b6003546001600160a01b03163314610a065760405163f5d267eb60e01b815260040160405180910390fd5b61012c81118015610a1957506101a48114155b15610a375760405163cd4e616760e01b815260040160405180910390fd5b6001600160a01b03821660009081526007602052604090205460ff16610a6f5760405162820f3560e61b815260040160405180910390fd5b6001600160a01b03821660008181526008602052604090819020839055517fae468ce586f9a87660fdffc1448cee942042c16ae2f02046b134b5224f31936b90610abc9084815260200190565b60405180910390a25050565b6003546001600160a01b03163314610af35760405163f5d267eb60e01b815260040160405180910390fd5b61012c811115610b165760405163cd4e616760e01b815260040160405180910390fd5b80600003610b375760405163af13986d60e01b815260040160405180910390fd5b8115610b435760015550565b60025550565b6000763d602d80600a3d3981f3363d3d373d3d3d363d730000008360601b60e81c176000526e5af43d82803e903d91602b57fd5bf38360781b1760205281603760096000f590506001600160a01b0381166109645760405162461bcd60e51b8152602060048201526017602482015276115490cc4c4d8dce8818dc99585d194c8819985a5b1959604a1b604482015260640160405180910390fd5b80356001600160a01b0381168114610bfb57600080fd5b919050565b600080600060608486031215610c1557600080fd5b610c1e84610be4565b9250610c2c60208501610be4565b9150604084013562ffffff81168114610c4457600080fd5b809150509250925092565b6001600160a01b0391909116815260200190565b600060208284031215610c7557600080fd5b610c7e82610be4565b9392505050565b80358015158114610bfb57600080fd5b600080600060608486031215610caa57600080fd5b610cb384610be4565b9250610cc160208501610be4565b9150610ccf60408501610c85565b90509250925092565b600060208284031215610cea57600080fd5b5035919050565b60008060408385031215610d0457600080fd5b610d0d83610be4565b9150610d1b60208401610c85565b90509250929050565b600060208284031215610d3657600080fd5b610c7e82610c85565b60008060408385031215610d5257600080fd5b610d5b83610be4565b946020939093013593505050565b60008060408385031215610d7c57600080fd5b610d5b83610c8556fea2646970667358221220e36d2d3c4fcd8fd44719571937dc3ba2557181b779603c045d9b142903136a4164736f6c63430008180033",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b50600436106101585760003560e01c80635c60da1b116100c3578063cc56b2c51161007c578063cc56b2c51461032b578063cdb88ad11461033e578063d0fb020314610351578063d49466a814610364578063e1f76b4414610377578063efde4e641461038a57600080fd5b80635c60da1b1461027f57806379bc57d5146102a65780639fd0506d146102ea578063a167129514610302578063b187bd2614610315578063bc063e1a1461032257600080fd5b806346c96aac1161011557806346c96aac146101e1578063472d35b9146101f45780634bc2a657146102075780634d419abc1461021a5780635084ed031461023a5780635b16ebb71461024357600080fd5b80631698ee821461015d5780632d88af4a1461018657806336bf95a01461019b57806338c55d46146101ae57806340bbd775146101c557806341d1de97146101ce575b600080fd5b61017061016b366004610c00565b610392565b60405161017d9190610c4f565b60405180910390f35b610199610194366004610c63565b610424565b005b6101706101a9366004610c95565b6104d6565b6101b76101a481565b60405190815260200161017d565b6101b760015481565b6101706101dc366004610cd8565b610795565b600454610170906001600160a01b031681565b610199610202366004610c63565b6107bf565b610199610215366004610c63565b61085c565b6101b7610228366004610c63565b60086020526000908152604090205481565b6101b760025481565b61026f610251366004610c63565b6001600160a01b031660009081526007602052604090205460ff1690565b604051901515815260200161017d565b6101707f000000000000000000000000000000000000000000000000000000000000000081565b6101706102b4366004610c95565b6001600160a01b039283166000908152600560209081526040808320948616835293815283822092151582529190915220541690565b6000546101709061010090046001600160a01b031681565b610170610310366004610c00565b6108d2565b60005461026f9060ff1681565b6101b761012c81565b6101b7610339366004610cf1565b610918565b61019961034c366004610d24565b61096a565b600354610170906001600160a01b031681565b610199610372366004610d3f565b6109db565b610199610385366004610d69565b610ac8565b6006546101b7565b600060018262ffffff1611610419578162ffffff166001146103e3576001600160a01b038085166000908152600560209081526040808320878516845282528083208380529091529020541661041c565b6001600160a01b03808516600090815260056020908152604080832087851684528252808320600184529091529020541661041c565b60005b949350505050565b60005461010090046001600160a01b031633146104545760405163492f678160e01b815260040160405180910390fd5b6001600160a01b03811661047b5760405163d92e233d60e01b815260040160405180910390fd5b60008054610100600160a81b0319166101006001600160a01b038416021790556040517fe02efb9e8f0fc21546730ab32d594f62d586e1bbb15bb5045edd0b1878a77b35906104cb908390610c4f565b60405180910390a150565b6000826001600160a01b0316846001600160a01b03160361050a5760405163367558c360e01b815260040160405180910390fd5b600080846001600160a01b0316866001600160a01b03161061052d578486610530565b85855b90925090506001600160a01b03821661055c5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b03828116600090815260056020908152604080832085851684528252808320881515845290915290205416156105ac57604051630188c99160e11b815260040160405180910390fd5b6040516bffffffffffffffffffffffff19606084811b8216602084015283901b16603482015284151560f81b60488201526000906049016040516020818303038152906040528051906020012090506106257f000000000000000000000000000000000000000000000000000000000000000082610b49565b604051631c9776b560e31b81526001600160a01b038581166004830152848116602483015287151560448301529195509085169063e4bbb5a890606401600060405180830381600087803b15801561067c57600080fd5b505af1158015610690573d6000803e3d6000fd5b505050506001600160a01b0383811660008181526005602081815260408084208887168086529083528185208c15158087529084528286208054988d166001600160a01b0319998a16811790915582875294845282862087875284528286208187528452828620805489168617905560068054600181810183557ff652222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d3f9091018054909a1687179099558587526007855295839020805460ff191690981790975593548151938452918301919091529192917f2128d88d14c80cb081c1252a5acff7a264671bf199ce226b53788fb26065005e910160405180910390a45050509392505050565b600681815481106107a557600080fd5b6000918252602090912001546001600160a01b0316905081565b6003546001600160a01b031633146107ea5760405163f5d267eb60e01b815260040160405180910390fd5b6001600160a01b0381166108115760405163d92e233d60e01b815260040160405180910390fd5b600380546001600160a01b0319166001600160a01b0383161790556040517f5d0517e3a4eabea892d9750138cd21d4a6cf3b935b43d0598df7055f463819b2906104cb908390610c4f565b6004546001600160a01b031633146108875760405163c18384c160e01b815260040160405180910390fd5b600480546001600160a01b0319166001600160a01b0383161790556040517fc6ff127433b785c51da9ae4088ee184c909b1a55b9afd82ae6c64224d3bc15d2906104cb908390610c4f565b600060018262ffffff1611156108fb576040516352dadcf960e01b815260040160405180910390fd5b600162ffffff83161461090f8585836104d6565b95945050505050565b6001600160a01b0382166000908152600860205260408120546101a4811461095d5780600003610957578261094f57600254610960565b600154610960565b80610960565b60005b9150505b92915050565b60005461010090046001600160a01b0316331461099a5760405163492f678160e01b815260040160405180910390fd5b6000805460ff19168215159081179091556040519081527f0d76538efc408318a051137c2720a9e82902acdbd46b802d488b74ca3a09a116906020016104cb565b6003546001600160a01b03163314610a065760405163f5d267eb60e01b815260040160405180910390fd5b61012c81118015610a1957506101a48114155b15610a375760405163cd4e616760e01b815260040160405180910390fd5b6001600160a01b03821660009081526007602052604090205460ff16610a6f5760405162820f3560e61b815260040160405180910390fd5b6001600160a01b03821660008181526008602052604090819020839055517fae468ce586f9a87660fdffc1448cee942042c16ae2f02046b134b5224f31936b90610abc9084815260200190565b60405180910390a25050565b6003546001600160a01b03163314610af35760405163f5d267eb60e01b815260040160405180910390fd5b61012c811115610b165760405163cd4e616760e01b815260040160405180910390fd5b80600003610b375760405163af13986d60e01b815260040160405180910390fd5b8115610b435760015550565b60025550565b6000763d602d80600a3d3981f3363d3d373d3d3d363d730000008360601b60e81c176000526e5af43d82803e903d91602b57fd5bf38360781b1760205281603760096000f590506001600160a01b0381166109645760405162461bcd60e51b8152602060048201526017602482015276115490cc4c4d8dce8818dc99585d194c8819985a5b1959604a1b604482015260640160405180910390fd5b80356001600160a01b0381168114610bfb57600080fd5b919050565b600080600060608486031215610c1557600080fd5b610c1e84610be4565b9250610c2c60208501610be4565b9150604084013562ffffff81168114610c4457600080fd5b809150509250925092565b6001600160a01b0391909116815260200190565b600060208284031215610c7557600080fd5b610c7e82610be4565b9392505050565b80358015158114610bfb57600080fd5b600080600060608486031215610caa57600080fd5b610cb384610be4565b9250610cc160208501610be4565b9150610ccf60408501610c85565b90509250925092565b600060208284031215610cea57600080fd5b5035919050565b60008060408385031215610d0457600080fd5b610d0d83610be4565b9150610d1b60208401610c85565b90509250929050565b600060208284031215610d3657600080fd5b610c7e82610c85565b60008060408385031215610d5257600080fd5b610d5b83610be4565b946020939093013593505050565b60008060408385031215610d7c57600080fd5b610d5b83610c8556fea2646970667358221220e36d2d3c4fcd8fd44719571937dc3ba2557181b779603c045d9b142903136a4164736f6c63430008180033",
+  "devdoc": {
+    "kind": "dev",
+    "methods": {
+      "createPool(address,address,bool)": {
+        "details": "token order does not matter",
+        "params": {
+          "stable": ".",
+          "tokenA": ".",
+          "tokenB": "."
+        }
+      },
+      "createPool(address,address,uint24)": {
+        "details": "fee is converted to stable booleantoken order does not matter",
+        "params": {
+          "fee": "1 if stable, 0 if volatile, else revert",
+          "tokenA": ".",
+          "tokenB": "."
+        }
+      },
+      "getPool(address,address,bool)": {
+        "params": {
+          "stable": "True if stable, false if volatile",
+          "tokenA": ".",
+          "tokenB": "."
+        }
+      },
+      "getPool(address,address,uint24)": {
+        "details": "fee is converted to stable boolean.",
+        "params": {
+          "fee": "1 if stable, 0 if volatile, else returns address(0)",
+          "tokenA": ".",
+          "tokenB": "."
+        }
+      },
+      "isPool(address)": {
+        "params": {
+          "": "."
+        }
+      },
+      "setCustomFee(address,uint256)": {
+        "details": "A custom fee of zero means the default fee will be used."
+      },
+      "setFee(bool,uint256)": {
+        "details": "Throws if higher than maximum fee.      Throws if fee is zero.",
+        "params": {
+          "_fee": ".",
+          "_stable": "Stable or volatile pool."
+        }
+      },
+      "setVoter(address)": {
+        "details": "Only called once to set to Voter.sol - Voter does not have a function      to call this contract method, so once set it's immutable.      This also follows convention of setVoterAndDistributor() in VotingEscrow.sol",
+        "params": {
+          "_voter": "."
+        }
+      }
+    },
+    "stateVariables": {
+      "voter": {
+        "details": "used to change the name/symbol of the pool by calling emergencyCouncil"
+      }
+    },
+    "version": 1
+  },
+  "userdoc": {
+    "kind": "user",
+    "methods": {
+      "allPoolsLength()": {
+        "notice": "returns the number of pools created from this factory"
+      },
+      "createPool(address,address,bool)": {
+        "notice": "Create a pool given two tokens and if they're stable/volatile"
+      },
+      "createPool(address,address,uint24)": {
+        "notice": "Support for v3-style pools which wraps around createPool(tokena,tokenB,stable)"
+      },
+      "getFee(address,bool)": {
+        "notice": "Returns fee for a pool, as custom fees are possible."
+      },
+      "getPool(address,address,bool)": {
+        "notice": "Return address of pool created by this factory"
+      },
+      "getPool(address,address,uint24)": {
+        "notice": "Support for v3-style pools which wraps around getPool(tokenA,tokenB,stable)"
+      },
+      "isPool(address)": {
+        "notice": "Is a valid pool created by this factory."
+      },
+      "setCustomFee(address,uint256)": {
+        "notice": "Set overriding fee for a pool from the default"
+      },
+      "setFee(bool,uint256)": {
+        "notice": "Set default fee for stable and volatile pools."
+      }
+    },
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [
+      {
+        "astId": 21865,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "isPaused",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_bool"
+      },
+      {
+        "astId": 21867,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "pauser",
+        "offset": 1,
+        "slot": "0",
+        "type": "t_address"
+      },
+      {
+        "astId": 21869,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "stableFee",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_uint256"
+      },
+      {
+        "astId": 21871,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "volatileFee",
+        "offset": 0,
+        "slot": "2",
+        "type": "t_uint256"
+      },
+      {
+        "astId": 21879,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "feeManager",
+        "offset": 0,
+        "slot": "3",
+        "type": "t_address"
+      },
+      {
+        "astId": 21882,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "voter",
+        "offset": 0,
+        "slot": "4",
+        "type": "t_address"
+      },
+      {
+        "astId": 21890,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "_getPool",
+        "offset": 0,
+        "slot": "5",
+        "type": "t_mapping(t_address,t_mapping(t_address,t_mapping(t_bool,t_address)))"
+      },
+      {
+        "astId": 21893,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "allPools",
+        "offset": 0,
+        "slot": "6",
+        "type": "t_array(t_address)dyn_storage"
+      },
+      {
+        "astId": 21897,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "_isPool",
+        "offset": 0,
+        "slot": "7",
+        "type": "t_mapping(t_address,t_bool)"
+      },
+      {
+        "astId": 21901,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "customFee",
+        "offset": 0,
+        "slot": "8",
+        "type": "t_mapping(t_address,t_uint256)"
+      },
+      {
+        "astId": 21903,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "_temp0",
+        "offset": 0,
+        "slot": "9",
+        "type": "t_address"
+      },
+      {
+        "astId": 21905,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "_temp1",
+        "offset": 0,
+        "slot": "10",
+        "type": "t_address"
+      },
+      {
+        "astId": 21907,
+        "contract": "contracts/factories/PoolFactory.sol:PoolFactory",
+        "label": "_temp",
+        "offset": 20,
+        "slot": "10",
+        "type": "t_bool"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_array(t_address)dyn_storage": {
+        "base": "t_address",
+        "encoding": "dynamic_array",
+        "label": "address[]",
+        "numberOfBytes": "32"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_mapping(t_address,t_bool)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => bool)",
+        "numberOfBytes": "32",
+        "value": "t_bool"
+      },
+      "t_mapping(t_address,t_mapping(t_address,t_mapping(t_bool,t_address)))": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => mapping(address => mapping(bool => address)))",
+        "numberOfBytes": "32",
+        "value": "t_mapping(t_address,t_mapping(t_bool,t_address))"
+      },
+      "t_mapping(t_address,t_mapping(t_bool,t_address))": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => mapping(bool => address))",
+        "numberOfBytes": "32",
+        "value": "t_mapping(t_bool,t_address)"
+      },
+      "t_mapping(t_address,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_mapping(t_bool,t_address)": {
+        "encoding": "mapping",
+        "key": "t_bool",
+        "label": "mapping(bool => address)",
+        "numberOfBytes": "32",
+        "value": "t_address"
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      }
+    }
+  }
+}
