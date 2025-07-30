@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
 import pandas as pd
 
-from scripts.get_raw_data import get_all_bridge_transactions
+from scripts.get_raw_data import get_all_bridge_transactions, get_subgraph_data
+from mezo.clients import SubgraphClient
+from mezo.queries import BridgeQueries
 from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.currency_config import TOKEN_MAP, TOKEN_TYPE_MAP, TOKENS_ID_MAP
 from mezo.datetime_utils import format_datetimes
@@ -37,7 +39,11 @@ def main():
         ProgressIndicators.print_step("Environment loaded successfully", "success")
         
         # Get raw bridge transactions
-        raw_data = get_all_bridge_transactions()
+        raw_data = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MEZO_BRIDGE_SUBGRAPH, 
+            BridgeQueries.GET_BRIDGE_TRANSACTIONS,
+            'assetsLockeds'
+        )
         
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")

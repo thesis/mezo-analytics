@@ -1,12 +1,13 @@
 from dotenv import load_dotenv
 import pandas as pd
 
-from scripts.get_raw_data import get_all_market_donations, get_all_market_purchases
-from mezo.clients import SupabaseClient, BigQueryClient
+# from scripts.get_raw_data import get_subgraph_data, get_all_market_donations, get_all_market_purchases
+from mezo.clients import SupabaseClient, BigQueryClient, SubgraphClient
 from mezo.datetime_utils import format_datetimes
 from mezo.currency_utils import format_musd_currency_columns
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
-from mezo.musd_config import MUSD_MARKET_MAP
+from mezo.currency_config import MUSD_MARKET_MAP
+from mezo.queries import MUSDQueries
 
 def replace_market_items(df, col, musd_market_map):
     """
@@ -109,9 +110,20 @@ def main():
         
         # Get raw market data
         ProgressIndicators.print_step("Fetching market donations data", "start")
-        donations = get_all_market_donations()
+        # donations = get_all_market_donations()
+        donations = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MUSD_MARKET_SUBGRAPH, 
+            MUSDQueries.GET_MARKET_DONATIONS,
+            'donateds'
+        )
+        
         ProgressIndicators.print_step("Fetching market purchases data", "start")
-        purchases = get_all_market_purchases()
+        # purchases = get_all_market_purchases()
+        purchases = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MUSD_MARKET_SUBGRAPH, 
+            MUSDQueries.GET_MARKET_PURCHASES,
+            'orderPlaceds'
+        )
         
         # Upload raw data to BigQuery
         bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')

@@ -54,6 +54,33 @@ class SubgraphClient:
 
         return all_results
     
+    def get_subgraph_data(subgraph_url, query, query_key):
+        """Generic function to fetch data from subgraphs
+        
+        Args:
+            subgraph_url: The subgraph URL to query
+            query: The GraphQL query to execute
+            query_key: The key to extract data from the response
+        
+        Returns:
+            pandas.DataFrame: The fetched data as a DataFrame, or None if no data
+        """
+        musd = SubgraphClient(url=subgraph_url, headers=SubgraphClient.SUBGRAPH_HEADERS)
+        
+        print(f"🔍 Trying {query_key} query...")
+        try:
+            data = musd.fetch_subgraph_data(query, query_key)
+            if data:
+                df = pd.DataFrame(data)
+                print(f"✅ Found {len(df)} {query_key} records")
+                return df
+            else:
+                print(f"⚠️ {query_key} query returned no data")
+                return None
+        except Exception as e:
+            print(f"❌ {query_key} query failed: {e}")
+            return None
+    
     SUBGRAPH_HEADERS = {
         "Content-Type": "application/json",
     }
@@ -66,6 +93,8 @@ class SubgraphClient:
     MUSD_STABILITY_POOL_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-stability-pool/1.0.0/gn"
     MUSD_TROVE_MANAGER_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn"
     AUGUST_VAULT_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn"
+    SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
+
 class SupabaseClient:
 
     def __init__(self):
@@ -290,8 +319,6 @@ class SupabaseClient:
                 add_indexes=timestamp_cols if timestamp_cols else None
             )
 
-# A helper for the Mezo chain API
-
 class APIClient:
     """A class to handle API requests for contract data."""
 
@@ -456,7 +483,7 @@ class Web3Client:
         self.w3 = Web3(Web3.HTTPProvider(self.node))
 
     def load_abi(self):
-        path_name = f'mezo/smart_contracts/{self.contract_name}.json'
+        path_name = f'../mezo/smart_contracts/{self.contract_name}.json'
         with open(path_name, "r") as file:
             content = file.read()
         return json.loads(content)

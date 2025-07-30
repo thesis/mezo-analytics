@@ -5,8 +5,9 @@ import requests
 from mezo.currency_utils import format_musd_currency_columns, get_token_price
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
-from mezo.clients import SupabaseClient, BigQueryClient
-from scripts.get_raw_data import get_all_loans, get_liquidation_data, get_trove_liquidated_data
+from mezo.clients import SupabaseClient, BigQueryClient, SubgraphClient
+from mezo.queries import MUSDQueries
+# from scripts.get_raw_data import get_subgraph_data, get_all_loans, get_liquidation_data, get_trove_liquidated_data
 
 load_dotenv(dotenv_path='../.env', override=True)
 COINGECKO_KEY = os.getenv('COINGECKO_KEY')
@@ -15,9 +16,29 @@ supabase = SupabaseClient()
 bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
 
 # import raw data
-raw_loans = get_all_loans()
-raw_liquidations = get_liquidation_data()
-raw_troves_liquidated = get_trove_liquidated_data()
+# raw_loans = get_all_loans()
+
+raw_loans = SubgraphClient.get_subgraph_data(
+    SubgraphClient.BORROWER_OPS_SUBGRAPH,
+    MUSDQueries.GET_LOANS,
+    'troveUpdateds'
+)
+
+# raw_liquidations = get_liquidation_data()
+
+raw_liquidations = SubgraphClient.get_subgraph_data(
+    SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH,
+    MUSDQueries.GET_MUSD_LIQUIDATIONS,
+    'liquidations'
+)
+
+# raw_troves_liquidated = get_trove_liquidated_data()
+
+raw_troves_liquidated = SubgraphClient.get_subgraph_data(
+    SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH,
+    MUSDQueries.GET_LIQUIDATED_TROVES,
+    'troveLiquidateds'
+)
 
 # Upload raw data to BigQuery
 print("📤 Uploading raw data to BigQuery...")
