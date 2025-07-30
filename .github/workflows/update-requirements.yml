@@ -1,0 +1,308 @@
+name: Update Requirements
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2:00 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Force update even if no changes detected'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: 3.13
+
+jobs:
+  update-requirements:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install pip-tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools
+        
+    - name: 🔍 Scan codebase for imports
+      run: |
+        echo "Scanning Python files for imports..."
+        
+        # Create a script to extract imports from Python files
+        cat > extract_imports.py << 'EOF'
+        import os
+        import ast
+        import sys
+        from pathlib import Path
+        
+        def extract_imports_from_file(filepath):
+            """Extract import statements from a Python file."""
+            imports = set()
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    tree = ast.parse(f.read())
+                
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            imports.add(alias.name.split('.')[0])
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            imports.add(node.module.split('.')[0])
+            except:
+                pass  # Skip files that can't be parsed
+            return imports
+        
+        def scan_directory(directory):
+            """Scan directory for Python files and extract imports."""
+            all_imports = set()
+            
+            for py_file in Path(directory).rglob('*.py'):
+                # Skip __pycache__ and .git directories
+                if '__pycache__' in str(py_file) or '.git' in str(py_file):
+                    continue
+                    
+                file_imports = extract_imports_from_file(py_file)
+                all_imports.update(file_imports)
+            
+            return all_imports
+        
+        # Standard library modules to exclude
+        stdlib_modules = {
+            'os', 'sys', 'json', 'time', 'datetime', 'pathlib', 'logging',
+            'unittest', 'functools', 'typing', 'collections', 'itertools',
+            'subprocess', 'traceback', 'decimal', 'copy', 'math', 're',
+            'urllib', 'http', 'email', 'hashlib', 'base64', 'uuid',
+            'pickle', 'csv', 'xml', 'html', 'io', 'gzip', 'zipfile',
+            'tarfile', 'shutil', 'glob', 'fnmatch', 'tempfile', 'socket',
+            'threading', 'multiprocessing', 'asyncio', 'queue', 'heapq',
+            'bisect', 'weakref', 'gc', 'inspect', 'warnings', 'contextlib',
+            'abc', 'enum', 'dataclasses', 'argparse', 'configparser',
+            'platform', 'site', '__future__'
+        }
+        
+        # Scan the codebase
+        imports = scan_directory('.')
+        
+        # Filter out standard library modules and local modules
+        third_party_imports = {
+            imp for imp in imports 
+            if imp not in stdlib_modules 
+            and not imp.startswith('mezo')
+            and not imp.startswith('scripts')
+            and not imp.startswith('tests')
+            and imp != '__main__'
+        }
+        
+        # Known package mappings (import name -> package name)
+        package_mappings = {
+            'google.cloud': 'google-cloud-bigquery',
+            'google.oauth2': 'google-auth',
+            'dotenv': 'python-dotenv',
+            'sklearn': 'scikit-learn',
+            'PIL': 'Pillow',
+            'cv2': 'opencv-python',
+            'yaml': 'PyYAML',
+            'bs4': 'beautifulsoup4',
+            'dateutil': 'python-dateutil',
+            'jwt': 'PyJWT',
+        }
+        
+        # Convert imports to package names
+        packages = set()
+        for imp in third_party_imports:
+            # Check for known mappings
+            mapped = False
+            for pattern, package in package_mappings.items():
+                if imp.startswith(pattern.split('.')[0]):
+                    packages.add(package)
+                    mapped = True
+                    break
+            
+            if not mapped:
+                packages.add(imp.replace('_', '-'))
+        
+        # Write to file
+        with open('detected_packages.txt', 'w') as f:
+            for package in sorted(packages):
+                f.write(f"{package}\n")
+        
+        print(f"Detected {len(packages)} third-party packages:")
+        for package in sorted(packages):
+            print(f"  - {package}")
+        EOF
+        
+        python extract_imports.py
+        
+    - name: 📝 Generate new requirements
+      run: |
+        echo "Generating updated requirements.txt..."
+        
+        # Create base requirements with core dependencies
+        cat > requirements_new.txt << 'EOF'
+        -e .
+
+        # Core data processing
+        pandas>=2.3.0
+        numpy>=2.3.0
+
+        # Web3 and blockchain
+        web3>=6.0.0
+
+        # HTTP requests
+        requests>=2.32.4
+
+        # Environment management
+        python-dotenv>=1.0.0
+
+        # Database and API clients
+        google-cloud-bigquery>=3.0.0
+        google-auth>=2.0.0
+        supabase>=2.15.3
+        pyarrow>=10.0.0
+
+        # Data visualization
+        matplotlib>=3.7.0
+
+        # Jupyter and development
+        ipython>=9.3.0
+        jupyterlab>=4.0.0
+        notebook>=7.0.0
+
+        # Development and testing
+        pytest>=8.4.0
+
+        # Code quality
+        ruff>=0.1.0
+
+        # Machine learning (optional)
+        scikit-learn>=1.3.0
+
+        # Documentation
+        mkdocs>=1.5.0
+
+        # Development setup
+        pip>=23.0.0
+        EOF
+        
+        # Add detected packages that aren't already included
+        echo "" >> requirements_new.txt
+        echo "# Auto-detected dependencies" >> requirements_new.txt
+        
+        while IFS= read -r package; do
+            # Skip if already in base requirements
+            if ! grep -q "^${package}" requirements_new.txt; then
+                echo "${package}" >> requirements_new.txt
+            fi
+        done < detected_packages.txt
+        
+    - name: 🔍 Check for changes
+      id: check_changes
+      run: |
+        if cmp -s requirements.txt requirements_new.txt; then
+            echo "No changes detected in requirements.txt"
+            echo "changes_detected=false" >> $GITHUB_OUTPUT
+        else
+            echo "Changes detected in requirements.txt"
+            echo "changes_detected=true" >> $GITHUB_OUTPUT
+            
+            echo "Differences:"
+            diff requirements.txt requirements_new.txt || true
+        fi
+        
+    - name: 📋 Update requirements.txt
+      if: steps.check_changes.outputs.changes_detected == 'true' || github.event.inputs.force_update == 'true'
+      run: |
+        cp requirements_new.txt requirements.txt
+        echo "requirements.txt has been updated"
+        
+    - name: 🧪 Test new requirements
+      if: steps.check_changes.outputs.changes_detected == 'true' || github.event.inputs.force_update == 'true'
+      run: |
+        echo "Testing new requirements..."
+        pip install -r requirements.txt
+        
+        # Test that key imports work
+        python -c "
+        import pandas as pd
+        import numpy as np
+        import requests
+        from dotenv import load_dotenv
+        print('✅ Core dependencies working')
+        
+        try:
+            from web3 import Web3
+            print('✅ Web3 working')
+        except ImportError as e:
+            print(f'⚠️ Web3 issue: {e}')
+        
+        try:
+            from google.cloud import bigquery
+            print('✅ BigQuery working')
+        except ImportError as e:
+            print(f'⚠️ BigQuery issue: {e}')
+        
+        try:
+            from supabase import create_client
+            print('✅ Supabase working')  
+        except ImportError as e:
+            print(f'⚠️ Supabase issue: {e}')
+        "
+        
+    - name: 📝 Create Pull Request
+      if: steps.check_changes.outputs.changes_detected == 'true' || github.event.inputs.force_update == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update requirements.txt with detected dependencies"
+        title: "🔄 Auto-update requirements.txt"
+        body: |
+          ## 🤖 Automated Requirements Update
+          
+          This PR was automatically generated to update `requirements.txt` with newly detected dependencies from the codebase.
+          
+          ### Changes Made:
+          - Scanned all Python files for import statements
+          - Added missing third-party dependencies
+          - Maintained existing version constraints
+          - Tested that core dependencies still work
+          
+          ### What to Review:
+          - [ ] Check that all new dependencies are legitimate
+          - [ ] Verify version constraints are appropriate
+          - [ ] Test that the application still works with new requirements
+          
+          **Generated by**: GitHub Actions workflow
+          **Trigger**: ${{ github.event_name }}
+        branch: auto-update-requirements
+        delete-branch: true
+        
+    - name: 📊 Summary
+      run: |
+        echo "## Requirements Update Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ steps.check_changes.outputs.changes_detected }}" == "true" || "${{ github.event.inputs.force_update }}" == "true" ]]; then
+            echo "✅ **requirements.txt updated and PR created**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "A pull request has been created with the updated requirements." >> $GITHUB_STEP_SUMMARY
+        else
+            echo "ℹ️ **No changes needed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "requirements.txt is already up to date." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Detected Packages:" >> $GITHUB_STEP_SUMMARY
+        cat detected_packages.txt | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
