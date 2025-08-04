@@ -89,6 +89,28 @@ class MUSDQueries:
       }
     }
     """
+  
+  GET_SWAPS = """
+    query GetSwaps($skip: Int!) {
+      swaps(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+      ) {
+        timestamp_
+        sender
+        to
+        contractId_
+        amount0In
+        amount0Out
+        amount1In
+        amount1Out
+        transactionHash_
+        block_number
+      }
+    }
+    """
 
 class BridgeQueries:
 

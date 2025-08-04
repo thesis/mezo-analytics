@@ -13,12 +13,6 @@ TOKEN_MAP = {
     '0xdac17f958d2ee523a2206206994597c13d831ec7' : 'USDT'
  }
 
-MEZO_TOKEN_MAP = {
-    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'BTC',
-    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
-    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'USDT'
-}
-
 TOKEN_TYPE_MAP = {
     'BTC' : 'bitcoin',
     'WBTC' : 'bitcoin',
@@ -62,9 +56,22 @@ TOKENS_ID_MAP = {
 }
 
 POOLS_MAP = {
-    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'musd_btc_pool',
-    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'musd_musdc_pool',
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'btc_musd_pool',
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'musdc_musd_pool',
     '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'musd_musdt_pool'
+}
+
+POOL_TOKEN0_MAP = {
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'BTC',
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
+    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'MUSD'
+}
+
+# Pool token pair mappings: token0 and token1 for each pool
+POOL_TOKEN_PAIRS = {
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': {'token0': 'BTC', 'token1': 'MUSD'},
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': {'token0': 'USDC', 'token1': 'MUSD'},
+    '0x10906a9e9215939561597b4c8e4b98f93c02031a': {'token0': 'MUSD', 'token1': 'USDT'}
 }
 
 MUSD_MARKET_MAP = {

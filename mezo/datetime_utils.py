@@ -3,11 +3,15 @@ import pandas as pd
 
 def convert_unix_to_datetime(df, columns):
     def is_valid_unix_timestamp(value):
-        return isinstance(value, (int, float)) and (1e9 <= value <= 1e13)
+        return isinstance(value, (int, float)) and (1e9 <= value <= 1e16)
 
     def convert_timestamp(value):
         if is_valid_unix_timestamp(value):
-            if value > 1e12:
+            # Handle microseconds (16 digits)
+            if value > 1e15:
+                value = value / 1e6
+            # Handle milliseconds (13 digits) 
+            elif value > 1e12:
                 value = value / 1000 
             return datetime.fromtimestamp(value, tz=timezone.utc)
         else:
@@ -24,6 +28,7 @@ def format_datetimes(df, date_columns):
     df[date_columns] = df[date_columns].apply(lambda col: pd.to_datetime(col).dt.date)
     
     return df
+
 
 def groupby_date(df: pd.DataFrame, date_column='date', agg_dict=None) -> pd.DataFrame:
     if date_column not in df.columns:
