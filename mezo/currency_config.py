@@ -1,4 +1,3 @@
-
 TOKEN_MAP = {
     '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599' : 'WBTC',
     '0x18084fba666a33d37592fa2633fd49a74dd93a88' : 'tBTC',
@@ -54,4 +53,34 @@ TOKENS_ID_MAP = {
     'thUSD' : 'threshold-usd',
     'DAI' : 'dai',
     'T' : 'threshold-network-token'
+}
+
+POOLS_MAP = {
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'btc_musd_pool',
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'musdc_musd_pool',
+    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'musd_musdt_pool'
+}
+
+POOL_TOKEN0_MAP = {
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'BTC',
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
+    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'MUSD'
+}
+
+# Pool token pair mappings: token0 and token1 for each pool
+POOL_TOKEN_PAIRS = {
+    '0x52e604c44417233b6ccedddc0d640a405caacefb': {'token0': 'BTC', 'token1': 'MUSD'},
+    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': {'token0': 'USDC', 'token1': 'MUSD'},
+    '0x10906a9e9215939561597b4c8e4b98f93c02031a': {'token0': 'MUSD', 'token1': 'USDT'}
+}
+
+MUSD_MARKET_MAP = {
+    '0x28D351135955bc98f6C62535e6816399134e6506' : 'Brink',
+    '0x77DCB767ae72d6aff6B8C20c2a76C6f66A5Cb46c' : 'SheFi',
+    '1001' : 'ledger_nano_x',
+    '1002' : 'ledger_stax', 
+    '1003' : 'bitrefill_25',
+    '1004' : 'bitrefill_50',
+    '1005' : 'bitrefill_100', 
+    '1006' : 'bitrefill_200'
 }
