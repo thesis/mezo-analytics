@@ -1,14 +1,11 @@
 import requests
 import time
 import os
-import requests
 import pandas as pd
 import numpy as np
-import pandas as pd
 from supabase import create_client, Client
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
-from google.cloud import bigquery
 from dotenv import load_dotenv
 from web3 import Web3
 import json
@@ -94,6 +91,8 @@ class SubgraphClient:
     MUSD_TROVE_MANAGER_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn"
     AUGUST_VAULT_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn"
     SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
+    POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
+    TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
 
 class SupabaseClient:
 
@@ -407,6 +406,76 @@ class BigQueryClient:
             return True
         except NotFound:
             return False
+
+    def upsert_table(self, df: pd.DataFrame, dataset_id: str, table_id: str, key_columns: list):
+        """
+        Upsert (insert or update) data in BigQuery table.
+        Updates existing rows and inserts new ones based on key columns.
+        
+        Args:
+            df: DataFrame to upsert
+            dataset_id: BigQuery dataset ID
+            table_id: BigQuery table ID  
+            key_columns: List of column names that uniquely identify each row
+        """
+        # Ensure table exists
+        if not self.table_exists(dataset_id, table_id):
+            print(f"📋 Table {dataset_id}.{table_id} does not exist. Creating...")
+            self.create_table(df, dataset_id, table_id)
+            return
+        
+        print(f"📋 Upserting data to {dataset_id}.{table_id}...")
+        
+        # Create a temporary table with new data
+        temp_table_id = f"{table_id}_temp_{int(time.time())}"
+        temp_table_ref = self.client.dataset(dataset_id).table(temp_table_id)
+        
+        try:
+            # Upload new data to temporary table
+            job_config = bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+                autodetect=True
+            )
+            
+            job = self.client.load_table_from_dataframe(df, temp_table_ref, job_config=job_config)
+            job.result()
+            
+            # Build the merge query
+            key_conditions = " AND ".join([f"target.{col} = source.{col}" for col in key_columns])
+            
+            # Get all column names for the update and insert
+            columns = list(df.columns)
+            if 'id' in columns:
+                columns.remove('id')  # Don't update the id column
+            
+            update_assignments = ", ".join([f"{col} = source.{col}" for col in columns])
+            
+            insert_columns = ", ".join(columns)
+            insert_values = ", ".join([f"source.{col}" for col in columns])
+            
+            merge_query = f"""
+            MERGE `{dataset_id}.{table_id}` AS target
+            USING `{dataset_id}.{temp_table_id}` AS source
+            ON {key_conditions}
+            WHEN MATCHED THEN
+                UPDATE SET {update_assignments}
+            WHEN NOT MATCHED THEN
+                INSERT ({insert_columns})
+                VALUES ({insert_values})
+            """
+            
+            # Execute the merge
+            merge_job = self.client.query(merge_query)
+            merge_job.result()
+            
+            print(f"✅ Upserted data to {dataset_id}.{table_id}")
+            
+        finally:
+            # Clean up temporary table
+            try:
+                self.client.delete_table(temp_table_ref)
+            except Exception as e:
+                print(f"⚠️ Could not delete temp table: {e}")
 
     def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str):
         """

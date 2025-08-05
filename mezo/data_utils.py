@@ -1,17 +1,6 @@
 import pandas as pd
 from datetime import datetime
 
-def save_raw_data(df, suffix):
-    path = '/Users/laurenjackson/Desktop/mezo-analytics-mainnet/data/raw/'
-    updated_on = datetime.today().date()
-    df.to_csv(f'{path}/{updated_on}_{suffix}')
-
-def load_raw_data(filename):
-    path = f"/Users/laurenjackson/Desktop/mezo-analytics-mainnet/data/raw/"
-    df = pd.read_csv(f'{path}/{filename}')
-    
-    return df
-
 def add_cumulative_columns(df, cols):
     # First, add the cumulative columns
     df_with_cumulative = df.assign(**{

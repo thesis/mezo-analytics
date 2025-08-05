@@ -29,7 +29,6 @@ def format_datetimes(df, date_columns):
     
     return df
 
-
 def groupby_date(df: pd.DataFrame, date_column='date', agg_dict=None) -> pd.DataFrame:
     if date_column not in df.columns:
         raise ValueError(f"Column '{date_column}' not found in DataFrame.")
@@ -40,3 +39,13 @@ def groupby_date(df: pd.DataFrame, date_column='date', agg_dict=None) -> pd.Data
     daily_df = df.groupby([date_column]).agg(agg_dict).reset_index()
     
     return daily_df
+
+def groupby_week(df: pd.DataFrame, date_column, agg_dict=None) -> pd.DataFrame:
+    if date_column not in df.columns:
+      raise ValueError(f"Column '{date_column}' not found in DataFrame.")    
+    if not agg_dict:
+        raise ValueError("Aggregation dictionary (agg_dict) cannot be empty.")
+
+    weekly_df = df.groupby(pd.Grouper(key=date_column, freq='W')).agg(agg_dict).reset_index()
+
+    return weekly_df

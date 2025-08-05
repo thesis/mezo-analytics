@@ -84,3 +84,11 @@ MUSD_MARKET_MAP = {
     '1005' : 'bitrefill_100', 
     '1006' : 'bitrefill_200'
 }
+
+# Token mapping for Tigris pools
+TIGRIS_MAP = {
+    'Volatile AMM - BTC/MUSD': 'btc_musd_pool',
+    'Stable AMM - mUSDC/MUSD': 'musdc_musd_pool',
+    'Stable AMM - MUSD/mUSDT': 'musd_musdt_pool',
+    'Stable AMM - mUSDC/mUSDT': 'musdc_musdt_pool'
+}
