@@ -287,18 +287,21 @@ def main():
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
         if raw_loans is not None and len(raw_loans) > 0:
-            raw_loans['id'] = range(1, len(raw_loans) + 1)
-            bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw')
+            raw_loans_copy = raw_loans.copy()
+            raw_loans_copy['id'] = range(1, len(raw_loans_copy) + 1)
+            bq.update_table(raw_loans_copy, 'raw_data', 'musd_loans_raw')
             ProgressIndicators.print_step("Uploaded raw_loans to BigQuery", "success")
 
         if raw_liquidations is not None and len(raw_liquidations) > 0:
-            raw_liquidations['id'] = range(1, len(raw_liquidations) + 1)
-            bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw')
+            raw_liquidations_copy = raw_liquidations.copy()
+            raw_liquidations_copy['id'] = range(1, len(raw_liquidations_copy) + 1)
+            bq.update_table(raw_liquidations_copy, 'raw_data', 'musd_liquidations_raw')
             ProgressIndicators.print_step("Uploaded raw_liquidations to BigQuery", "success")
 
         if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
-            raw_troves_liquidated['id'] = range(1, len(raw_troves_liquidated) + 1)
-            bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw')
+            raw_troves_liquidated_copy = raw_troves_liquidated.copy()
+            raw_troves_liquidated_copy['id'] = range(1, len(raw_troves_liquidated_copy) + 1)
+            bq.update_table(raw_troves_liquidated_copy, 'raw_data', 'musd_troves_liquidated_raw')
             ProgressIndicators.print_step("Uploaded raw_troves_liquidated to BigQuery", "success")
 
         # Clean and process loan data

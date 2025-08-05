@@ -152,8 +152,9 @@ def main():
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw swap data to BigQuery", "start")
         if raw_swap_data is not None and len(raw_swap_data) > 0:
-            raw_swap_data['id'] = range(1, len(raw_swap_data) + 1)
-            bq.update_table(raw_swap_data, 'raw_data', 'swaps_raw')
+            raw_swap_data_copy = raw_swap_data.copy()
+            raw_swap_data_copy['id'] = range(1, len(raw_swap_data_copy) + 1)
+            bq.update_table(raw_swap_data_copy, 'raw_data', 'swaps_raw')
             ProgressIndicators.print_step("Uploaded raw swap data to BigQuery", "success")
 
         # Clean the swap data
@@ -162,9 +163,9 @@ def main():
         # Upload cleaned swaps to BigQuery
         ProgressIndicators.print_step("Uploading cleaned swap data to BigQuery", "start")
         if swaps_df_clean is not None and len(swaps_df_clean) > 0:
-            swaps_clean_with_id = swaps_df_clean.copy()
-            swaps_clean_with_id['id'] = range(1, len(swaps_clean_with_id) + 1)
-            bq.update_table(swaps_clean_with_id, 'staging', 'swaps_clean')
+            swaps_clean_copy = swaps_df_clean.copy()
+            swaps_clean_copy['id'] = range(1, len(swaps_clean_copy) + 1)
+            bq.update_table(swaps_clean_copy, 'staging', 'swaps_clean')
             ProgressIndicators.print_step("Uploaded clean swap data to BigQuery", "success")
 
         # Create daily aggregations
