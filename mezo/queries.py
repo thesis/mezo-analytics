@@ -1,4 +1,92 @@
 
+class PoolQueries:
+  GET_DEPOSITS = """
+  query getMints ($skip: Int!) {
+    mints(
+        first: 1000
+        orderBy: timestamp_
+        orderDirection: desc
+        skip: $skip
+    ) {
+        timestamp_
+        sender
+        amount0
+        amount1
+        contractId_
+        transactionHash_
+    }
+}
+"""
+
+  GET_WITHDRAWALS = """
+  query getWithdrawals($skip: Int!) {
+    burns(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+  ) {
+      timestamp_
+      sender
+      to
+      amount0
+      amount1
+      contractId_
+      transactionHash_
+    }
+  }
+  """
+
+  GET_POOL_VOLUME = """
+  query getPoolVolumes($skip: Int!) {
+    poolVolumes(
+      interval: day
+      first: 1000
+      orderBy: timestamp_ 
+      orderDirection: desc
+      skip: $skip
+    ) {
+      timestamp
+      pool {
+        name
+        token0 {
+          symbol
+        }
+        token1 {
+          symbol
+        }
+      }
+      totalVolume0
+      totalVolume1
+    }
+  }
+  """
+
+  GET_TOTAL_POOL_FEES = """
+  query getTotalPoolFees($skip: Int!) {
+    feesStats_collection(
+      interval: day
+      first: 1000
+      orderBy: timestamp_ 
+      orderDirection: desc
+      skip: $skip
+    ) {
+      timestamp
+        pool {
+        name
+          token0 {
+            symbol
+          }
+          token1 {
+            symbol
+          }
+        }
+      totalFees0
+      totalFees1
+    }
+  }
+  """
+
 class MUSDQueries:
 
   GET_MUSD_COLL_SNAPSHOT = """
@@ -113,6 +201,22 @@ class MUSDQueries:
     """
 
 class BridgeQueries:
+
+  GET_WORMHOLE_TXNS = """
+  query getWormholeTxns {
+    transferSents(first: 10, orderBy: timestamp_, orderDirection: desc) {
+      timestamp_
+      refundAddress
+      recipient
+      recipientChain
+      msgSequence
+      amount
+      fee
+      contractId_
+      transactionHash_
+    }
+  }
+  """
 
   GET_AUTOBRIDGE_TRANSACTIONS = """
   query autobridgeDeposits($skip: Int!) {

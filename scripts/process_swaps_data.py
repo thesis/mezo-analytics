@@ -185,10 +185,16 @@ def main():
 
         for dataset, table_name in datasets_to_upload:
             if dataset is not None and len(dataset) > 0:
-                dataset_with_id = dataset.copy()
-                dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
-                bq.update_table(dataset_with_id, 'staging', table_name)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+                if table_name == 'swaps_by_pool':
+                    # Use upsert for summary statistics (updates existing pool rows)
+                    bq.upsert_table(dataset, 'staging', table_name, ['pool'])
+                    ProgressIndicators.print_step(f"Upserted {table_name} to BigQuery", "success")
+                else:
+                    # Use regular update for time-series data (appends new rows)
+                    dataset_with_id = dataset.copy()
+                    dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
+                    bq.update_table(dataset_with_id, 'staging', table_name)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # # Calculate summary statistics
         ProgressIndicators.print_step("Calculating summary statistics", "start")
