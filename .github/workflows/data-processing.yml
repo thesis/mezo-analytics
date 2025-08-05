@@ -22,6 +22,16 @@ on:
         required: false
         default: 'true'
         type: boolean
+      run_swaps_data:
+        description: 'Run swaps data processing'
+        required: false
+        default: 'true'
+        type: boolean
+      run_pools_data:
+        description: 'Run pools data processing'
+        required: false
+        default: 'true'
+        type: boolean
 
 env:
   PYTHON_VERSION: 3.13
@@ -123,10 +133,74 @@ jobs:
         python scripts/process_market_data.py
         echo "✅ Market data processing completed"
 
+  process-swaps-data:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_swaps_data == 'true')
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🔄 Process Swaps Data
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
+      run: |
+        echo "🚀 Starting swaps data processing..."
+        python scripts/process_swaps_data.py
+        echo "✅ Swaps data processing completed"
+
+  process-pools-data:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_pools_data == 'true')
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🏊 Process Pools Data
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
+      run: |
+        echo "🚀 Starting pools data processing..."
+        python scripts/process_pools_data.py
+        echo "✅ Pools data processing completed"
+
   notify-on-failure:
     runs-on: ubuntu-latest
     if: always() && contains(needs.*.result, 'failure')
-    needs: [process-bridge-data, process-musd-data, process-market-data]
+    needs: [process-bridge-data, process-musd-data, process-market-data, process-swaps-data, process-pools-data]
     
     steps:
     - name: 📱 Discord notification on failure
@@ -141,6 +215,12 @@ jobs:
         fi
         if [[ "${{ needs.process-market-data.result }}" == "failure" ]]; then
           FAILED_JOBS="${FAILED_JOBS}• Market Data Processing\n"
+        fi
+        if [[ "${{ needs.process-swaps-data.result }}" == "failure" ]]; then
+          FAILED_JOBS="${FAILED_JOBS}• Swaps Data Processing\n"
+        fi
+        if [[ "${{ needs.process-pools-data.result }}" == "failure" ]]; then
+          FAILED_JOBS="${FAILED_JOBS}• Pools Data Processing\n"
         fi
         
         curl -X POST -H "Content-Type: application/json" \
