@@ -287,35 +287,37 @@ def main():
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
         
+        fees_data['id'] = fees_data['id'].astype('int')
+        volume_data['id'] = volume_data['id'].astype('int')
+
         raw_datasets = [
-            (deposits_data, 'pool_deposits_raw'),
-            (withdrawals_data, 'pool_withdrawals_raw'),
-            (volume_data, 'pool_volume_raw'),
-            (fees_data, 'pool_fees_raw')
+            (deposits_data, 'pool_deposits_raw', 'transactionHash_'),
+            (withdrawals_data, 'pool_withdrawals_raw', 'transactionHash_'),
+            (volume_data, 'pool_volume_raw', 'id'),
+            (fees_data, 'pool_fees_raw', 'id')
         ]
 
-        for dataset, table_name in raw_datasets:
+        for dataset, table_name, id_column in raw_datasets:
             if dataset is not None and len(dataset) > 0:
-                dataset_with_id = dataset.copy()
-                dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
-                bq.update_table(dataset_with_id, 'raw_data', table_name)
+                bq.update_table(dataset, 'raw_data', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # Upload clean data to BigQuery
         ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
         
+        volume_clean['id'] = volume_clean['id'].astype('int')
+        fees_clean['id'] = fees_clean['id'].astype('int')
+
         clean_datasets = [
-            (deposits_clean, 'pool_deposits_clean'),
-            (withdrawals_clean, 'pool_withdrawals_clean'),
-            (volume_clean, 'pool_volume_clean'),
-            (fees_clean, 'pool_fees_clean')
+            (deposits_clean, 'pool_deposits_clean', 'transactionHash_'),
+            (withdrawals_clean, 'pool_withdrawals_clean', 'transactionHash_'),
+            (volume_clean, 'pool_volume_clean', 'id'),
+            (fees_clean, 'pool_fees_clean', 'id')
         ]
 
-        for dataset, table_name in clean_datasets:
+        for dataset, table_name, id_column in clean_datasets:
             if dataset is not None and len(dataset) > 0:
-                dataset_with_id = dataset.copy()
-                dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
-                bq.update_table(dataset_with_id, 'staging', table_name)
+                bq.update_table(dataset, 'staging', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # Create aggregated datasets

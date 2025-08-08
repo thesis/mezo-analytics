@@ -58,6 +58,7 @@ class PoolQueries:
       }
       totalVolume0
       totalVolume1
+      id
     }
   }
   """
@@ -83,6 +84,7 @@ class PoolQueries:
         }
       totalFees0
       totalFees1
+      id
     }
   }
   """
@@ -199,6 +201,24 @@ class MUSDQueries:
       }
     }
     """
+  
+  GET_MUSD_PRICE = """
+  query getMusdPrice($skip: Int!) {
+    syncs(
+      orderBy: timestamp_
+      orderDirection: desc
+      first: 1000
+      skip: $skip
+    ) {
+      timestamp_
+      reserve0
+      reserve1
+      contractId_
+      transactionHash_
+      block_number
+    }
+  }
+"""
 
 class BridgeQueries:
 
@@ -272,3 +292,22 @@ class BridgeQueries:
     }
   }
   """
+
+class VaultQueries:
+  GET_VAULT_TRANSFERS = """
+query vaultTransfers($skip: Int!) {
+  transfers(
+    first: 1000
+    orderBy: timestamp_
+    orderDirection: desc
+    skip: $skip
+) {
+    timestamp_
+    from
+    to
+    value
+    transactionHash_
+    block_number
+  }
+}
+"""

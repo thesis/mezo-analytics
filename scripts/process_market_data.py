@@ -48,9 +48,6 @@ def process_donations_data(donations):
         'donor': 'wallet'
     }
     donations_formatted = donations_formatted.rename(columns=donations_col_map)
-    
-    # Add id column for BigQuery upload
-    donations_formatted['id'] = range(1, len(donations_formatted) + 1)
 
     return donations_formatted
 
@@ -73,9 +70,6 @@ def process_purchases_data(purchases):
     }
     purchases_formatted = purchases_formatted.rename(columns=purchases_col_map)
 
-    # Add id column for BigQuery upload
-    purchases_formatted['id'] = range(1, len(purchases_formatted) + 1)
-    
     return purchases_formatted
 
 @with_progress("Merging and cleaning market transactions")
@@ -84,14 +78,13 @@ def create_market_transactions(donations_formatted, purchases_formatted):
     # Merge the two datasets
     market_transactions = pd.merge(donations_formatted, purchases_formatted, how='outer').fillna(0)
     
-    # Select and clean final columns
-    market_transactions_final = market_transactions[['date', 'item', 'amount', 'wallet', 'id']].copy()
+    # Select and clean final columns (ID will be added by BigQuery update_table method)
+    market_transactions_final = market_transactions[['date', 'item', 'amount', 'wallet', 'transactionHash_']].copy()
     
     # Convert data types for Supabase compatibility
     market_transactions_final[['date', 'item', 'wallet']] = market_transactions_final[['date', 'item', 'wallet']].astype(str)
     market_transactions_final['amount'] = market_transactions_final['amount'].astype(int)
 
-    # Add 'count' column
     market_transactions_final['count'] = 1
     
     return market_transactions_final
@@ -130,13 +123,11 @@ def main():
 
         ProgressIndicators.print_step("Uploading raw market data to BigQuery", "start")
         if donations is not None and len(donations) > 0:
-            donations['id'] = range(1, len(donations) + 1)
-            bq.update_table(donations, 'raw_data', 'market_donations')
+            bq.update_table(donations, 'raw_data', 'market_donations_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw donations to BigQuery", "success")
             
         if purchases is not None and len(purchases) > 0:
-            purchases['id'] = range(1, len(purchases) + 1)
-            bq.update_table(purchases, 'raw_data', 'market_purchases')
+            bq.update_table(purchases, 'raw_data', 'market_purchases_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw purchases to BigQuery", "success")
         
         # Validate raw data
@@ -163,7 +154,8 @@ def main():
 
         ProgressIndicators.print_step("Uploading cleaned market data to BigQuery", "start")
         if market_transactions_final is not None and len(market_transactions_final) > 0:
-            bq.update_table(market_transactions_final, 'staging', 'market_transactions_clean')
+            # Use transaction hash as unique ID for deduplication (now the default)
+            bq.update_table(market_transactions_final, 'staging', 'market_transactions_clean', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded cleaned market data to BigQuery", "success")
         
         # Display summary statistics
@@ -179,23 +171,23 @@ def main():
         )
         
         # Upload to Supabase
-        ProgressIndicators.print_step("Uploading to Supabase", "start")
-        supabase = SupabaseClient()
+        # ProgressIndicators.print_step("Uploading to Supabase", "start")
+        # supabase = SupabaseClient()
         
-        try:
-            # Ensure table exists with correct structure
-            if supabase.ensure_table_exists_for_dataframe('mainnet_musd_market_txns', market_transactions_final):
-                supabase.update_supabase('mainnet_musd_market_txns', market_transactions_final)
-                ProgressIndicators.print_step("Data uploaded to Supabase successfully", "success")
-            else:
-                ProgressIndicators.print_step("Failed to create/verify table mainnet_musd_market_txns", "error")
-        except Exception as e:
-            ProgressIndicators.print_step(f"Failed to upload to Supabase: {str(e)}", "error")
-            raise
+        # try:
+        #     # Ensure table exists with correct structure
+        #     if supabase.ensure_table_exists_for_dataframe('mainnet_musd_market_txns', market_transactions_final):
+        #         supabase.update_supabase('mainnet_musd_market_txns', market_transactions_final)
+        #         ProgressIndicators.print_step("Data uploaded to Supabase successfully", "success")
+        #     else:
+        #         ProgressIndicators.print_step("Failed to create/verify table mainnet_musd_market_txns", "error")
+        # except Exception as e:
+        #     ProgressIndicators.print_step(f"Failed to upload to Supabase: {str(e)}", "error")
+        #     raise
         
-        ProgressIndicators.print_header(f"{ProgressIndicators.ROCKET} MARKET DATA PROCESSING COMPLETED SUCCESSFULLY {ProgressIndicators.ROCKET}")
+        # ProgressIndicators.print_header(f"{ProgressIndicators.ROCKET} MARKET DATA PROCESSING COMPLETED SUCCESSFULLY {ProgressIndicators.ROCKET}")
         
-        return market_transactions_final
+        # return market_transactions_final
         
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")

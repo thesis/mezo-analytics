@@ -50,9 +50,7 @@ def main():
         ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
         bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
         if raw_data is not None and len(raw_data) > 0:
-            raw_data_copy = raw_data.copy()
-            raw_data_copy['id'] = range(1, len(raw_data_copy) + 1)
-            bq.update_table(raw_data_copy, 'raw_data', 'bridge_transactions')
+            bq.update_table(raw_data, 'raw_data', 'bridge_transactions_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw bridge data to BigQuery", "success")
 
         # Load the raw data
@@ -103,14 +101,10 @@ def main():
         # Remove the 'usd' column before uploading to BigQuery
         bridge_txns_with_usd = bridge_txns_with_usd.drop(columns=['usd'])
         
-        # Add id column for BigQuery - use copy to avoid modifying original data
-        bridge_txns_clean_copy = bridge_txns_with_usd.copy()
-        bridge_txns_clean_copy['id'] = range(1, len(bridge_txns_clean_copy) + 1)
-
         # Upload bridge transactions with USD to BigQuery staging
         ProgressIndicators.print_step("Uploading bridge transactions with USD to BigQuery staging", "start")
-        if bridge_txns_clean_copy is not None and len(bridge_txns_clean_copy) > 0:
-            bq.update_table(bridge_txns_clean_copy, 'staging', 'bridge_transactions_clean')
+        if bridge_txns_with_usd is not None and len(bridge_txns_with_usd) > 0:
+            bq.update_table(bridge_txns_with_usd, 'staging', 'bridge_transactions_clean', 'transactionHash_')
         ProgressIndicators.print_step("Uploaded bridge transactions with USD to BigQuery staging", "success")
         
         # Daily bridging data aggregation

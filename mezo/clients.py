@@ -477,51 +477,61 @@ class BigQueryClient:
             except Exception as e:
                 print(f"⚠️ Could not delete temp table: {e}")
 
-    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str):
+    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str, id_column: str):
         """
-        Update a BigQuery table with new data.
+        Update a BigQuery table with new data using an existing ID column for deduplication.
         
         - If table doesn't exist: creates the table
-        - If table exists: appends only new rows based on 'id' column comparison
+        - If table exists: appends only new rows based on ID column comparison
         
         Args:
-            df: DataFrame to upload (must include 'id' column)
+            df: DataFrame to upload (must contain the id_column)
             dataset_id: BigQuery dataset ID  
             table_id: BigQuery table ID
+            id_column: Name of the existing column to use as unique ID (default: 'transactionHash_')
         """
+        # Validate that ID column exists
+        if id_column not in df.columns:
+            raise ValueError(f"ID column '{id_column}' not found in DataFrame. Available columns: {list(df.columns)}")
+        
+        print(f"📊 Using column '{id_column}' as unique ID for deduplication")
+        
         # Check if table exists
         if not self.table_exists(dataset_id, table_id):
             print(f"📋 Table {dataset_id}.{table_id} does not exist. Creating...")
             self.create_table(df, dataset_id, table_id)
             return
         
-        # Table exists - append only new rows
+        # Table exists - check for existing IDs to avoid duplicates
         print(f"📋 Table {dataset_id}.{table_id} exists. Checking for new rows...")
         
         try:
-            # Get existing IDs to check for duplicates
+            # Get existing IDs for deduplication
             existing_ids_query = f"""
-            SELECT DISTINCT id
+            SELECT DISTINCT {id_column}
             FROM `{dataset_id}.{table_id}`
             """
-            existing_values = self.client.query(existing_ids_query).to_dataframe()
-            existing_ids = set(existing_values['id'].tolist()) if not existing_values.empty else set()
+            existing_result = self.client.query(existing_ids_query).to_dataframe()
             
-            # Filter out any rows with IDs that already exist
-            new_rows_mask = ~df['id'].isin(existing_ids)
+            if existing_result.empty:
+                existing_ids = set()
+            else:
+                existing_ids = set(existing_result[id_column].tolist())
+            
+            # Filter out rows that already exist
+            new_rows_mask = ~df[id_column].isin(existing_ids)
             new_df = df[new_rows_mask].copy()
             
             if new_df.empty:
                 print(f"✅ No new rows to upload to {dataset_id}.{table_id}")
                 return
-                
-            print(f"📊 Adding {len(new_df)} new rows with IDs {new_df['id'].min()}-{new_df['id'].max()}")
+            
+            print(f"📊 Found {len(new_df)} new rows to upload (filtered out {len(df) - len(new_df)} duplicates)")
             
         except Exception as e:
             error_msg = str(e).lower()
-            if "unrecognized name: id" in error_msg or "column id does not exist" in error_msg:
-                print(f"⚠️  Table exists but missing 'id' column. Recreating table with new schema...")
-                # Delete the existing table and recreate it
+            if f"unrecognized name: {id_column}" in error_msg or f"column {id_column} does not exist" in error_msg:
+                print(f"⚠️ Table exists but missing '{id_column}' column. Recreating table...")
                 table_ref = self.client.dataset(dataset_id).table(table_id)
                 self.client.delete_table(table_ref)
                 self.create_table(df, dataset_id, table_id)

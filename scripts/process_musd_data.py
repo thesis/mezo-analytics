@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 import pandas as pd
 import os
 import requests
-
 from mezo.currency_utils import format_musd_currency_columns, get_token_price
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
@@ -21,7 +20,6 @@ def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     df = format_datetimes(df, date_cols)
     df = format_musd_currency_columns(df, currency_cols)
     df['count'] = 1
-    # ID assignment moved to right before BigQuery upload
     return df
 
 
@@ -83,7 +81,7 @@ def process_liquidation_data(liquidations, troves_liquidated):
     liquidations_final = liquidations_df_final.copy()
     liquidations_final['coll'] = liquidations_final['coll'].astype(float)
 
-    return liquidations_final
+    return pd.DataFrame(liquidations_final)
 
 
 @with_progress("Creating daily loan aggregations")
@@ -145,7 +143,6 @@ def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans
     final_daily_musd['date'] = pd.to_datetime(final_daily_musd['date']).dt.strftime('%Y-%m-%d')
     
     return final_daily_musd
-
 
 @with_progress("Processing loan adjustments")
 def process_loan_adjustments(adjusted_loans):
@@ -287,21 +284,15 @@ def main():
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
         if raw_loans is not None and len(raw_loans) > 0:
-            raw_loans_copy = raw_loans.copy()
-            raw_loans_copy['id'] = range(1, len(raw_loans_copy) + 1)
-            bq.update_table(raw_loans_copy, 'raw_data', 'musd_loans_raw')
+            bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw_loans to BigQuery", "success")
 
         if raw_liquidations is not None and len(raw_liquidations) > 0:
-            raw_liquidations_copy = raw_liquidations.copy()
-            raw_liquidations_copy['id'] = range(1, len(raw_liquidations_copy) + 1)
-            bq.update_table(raw_liquidations_copy, 'raw_data', 'musd_liquidations_raw')
+            bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw_liquidations to BigQuery", "success")
 
         if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
-            raw_troves_liquidated_copy = raw_troves_liquidated.copy()
-            raw_troves_liquidated_copy['id'] = range(1, len(raw_troves_liquidated_copy) + 1)
-            bq.update_table(raw_troves_liquidated_copy, 'raw_data', 'musd_troves_liquidated_raw')
+            bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw_troves_liquidated to BigQuery", "success")
 
         # Clean and process loan data
@@ -317,8 +308,7 @@ def main():
         # Upload cleaned loans to BigQuery
         ProgressIndicators.print_step("Uploading cleaned loan data to BigQuery", "start")
         if loans is not None and len(loans) > 0:
-            loans['id'] = range(1, len(loans) + 1)
-            bq.update_table(loans, 'staging', 'all_loans_clean')
+            bq.update_table(loans, 'staging', 'all_loans_clean', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded all_loans_clean to BigQuery", "success")
 
         # Process liquidations
@@ -359,17 +349,16 @@ def main():
         # Upload loan subset data to BigQuery
         ProgressIndicators.print_step("Uploading loan subset data to BigQuery", "start")
         datasets_to_upload = [
-            (new_loans, 'new_loans_clean'),
-            (closed_loans, 'closed_loans_clean'),
-            (latest_open_loans, 'open_loans_clean'),
-            (final_adjusted_loans, 'adjusted_loans_clean')
+            (new_loans, 'new_loans_clean', 'transactionHash_'),
+            (closed_loans, 'closed_loans_clean', 'transactionHash_'),
+            (latest_open_loans, 'open_loans_clean', 'transactionHash_'),
+            (final_adjusted_loans, 'adjusted_loans_clean', 'transactionHash_'),
+            (liquidations_final, 'liquidated_loans_clean', 'transactionHash_')
         ]
 
-        for dataset, table_name in datasets_to_upload:
+        for dataset, table_name, id_column in datasets_to_upload:
             if dataset is not None and len(dataset) > 0:
-                dataset_with_id = dataset.copy()
-                dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
-                bq.update_table(dataset_with_id, 'staging', table_name)
+                bq.update_table(dataset, 'staging', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # Create daily aggregations
@@ -378,8 +367,7 @@ def main():
         # Upload daily loan data to BigQuery
         ProgressIndicators.print_step("Uploading daily loans data to BigQuery", "start")
         if final_daily_musd is not None and len(final_daily_musd) > 0:
-            final_daily_musd['id'] = range(1, len(final_daily_musd) + 1)
-            bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean')
+            bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean', 'date')
             ProgressIndicators.print_step("Uploaded final_daily_musd to BigQuery", "success")
 
         # Calculate summary statistics
@@ -425,55 +413,55 @@ def main():
         # Fetch MUSD token data
         musd_token = fetch_musd_token_data()
 
-        # Upload to Supabase with proper error handling
-        ProgressIndicators.print_step("Uploading to Supabase", "start")
+        # # Upload to Supabase with proper error handling
+        # ProgressIndicators.print_step("Uploading to Supabase", "start")
         
-        # Clean data for Supabase compatibility
-        def clean_dataframe_for_upload(df):
-            """Clean DataFrame for Supabase upload."""
-            import numpy as np
-            cleaned_df = df.copy()
-            # Convert column names to lowercase
-            cleaned_df.columns = [col.lower() for col in df.columns]
-            # Convert timestamp to string
-            for col in cleaned_df.columns:
-                if 'time' in col or 'date' in col or col.endswith('_'):
-                    cleaned_df[col] = cleaned_df[col].astype(str)
-            # Replace NaN with None
-            cleaned_df = cleaned_df.replace({np.nan: None})
-            return cleaned_df
+        # # Clean data for Supabase compatibility
+        # def clean_dataframe_for_upload(df):
+        #     """Clean DataFrame for Supabase upload."""
+        #     import numpy as np
+        #     cleaned_df = df.copy()
+        #     # Convert column names to lowercase
+        #     cleaned_df.columns = [col.lower() for col in df.columns]
+        #     # Convert timestamp to string
+        #     for col in cleaned_df.columns:
+        #         if 'time' in col or 'date' in col or col.endswith('_'):
+        #             cleaned_df[col] = cleaned_df[col].astype(str)
+        #     # Replace NaN with None
+        #     cleaned_df = cleaned_df.replace({np.nan: None})
+        #     return cleaned_df
 
-        # Convert integer columns that may have become floats back to integers
-        integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
-        for col in integer_columns:
-            if col in final_daily_musd.columns:
-                final_daily_musd[col] = final_daily_musd[col].astype(int)
+        # # Convert integer columns that may have become floats back to integers
+        # integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
+        # for col in integer_columns:
+        #     if col in final_daily_musd.columns:
+        #         final_daily_musd[col] = final_daily_musd[col].astype(int)
 
-        upload_operations = [
-            ('mainnet_musd_daily', clean_dataframe_for_upload(final_daily_musd)),
-            ('mainnet_musd_borrow_summary', clean_dataframe_for_upload(musd_summary)),
-            ('mainnet_musd_token_summary', clean_dataframe_for_upload(musd_token))
-        ]
+        # upload_operations = [
+        #     ('mainnet_musd_daily', clean_dataframe_for_upload(final_daily_musd)),
+        #     ('mainnet_musd_borrow_summary', clean_dataframe_for_upload(musd_summary)),
+        #     ('mainnet_musd_token_summary', clean_dataframe_for_upload(musd_token))
+        # ]
 
-        successful_uploads = 0
-        for table_name, data in upload_operations:
-            try:
-                if supabase.ensure_table_exists_for_dataframe(table_name, data):
-                    if 'token_summary' in table_name:
-                        supabase.append_to_supabase(table_name, data)
-                    else:
-                        supabase.update_supabase(table_name, data)
-                    ProgressIndicators.print_step(f"Uploaded to {table_name}", "success")
-                    successful_uploads += 1
-                else:
-                    ProgressIndicators.print_step(f"Failed to create/verify table {table_name}", "error")
-            except Exception as e:
-                ProgressIndicators.print_step(f"Failed to upload to {table_name}: {str(e)}", "error")
+        # successful_uploads = 0
+        # for table_name, data in upload_operations:
+        #     try:
+        #         if supabase.ensure_table_exists_for_dataframe(table_name, data):
+        #             if 'token_summary' in table_name:
+        #                 supabase.append_to_supabase(table_name, data)
+        #             else:
+        #                 supabase.update_supabase(table_name, data)
+        #             ProgressIndicators.print_step(f"Uploaded to {table_name}", "success")
+        #             successful_uploads += 1
+        #         else:
+        #             ProgressIndicators.print_step(f"Failed to create/verify table {table_name}", "error")
+        #     except Exception as e:
+        #         ProgressIndicators.print_step(f"Failed to upload to {table_name}: {str(e)}", "error")
 
-        if successful_uploads == len(upload_operations):
-            ProgressIndicators.print_step("All data uploaded to Supabase successfully", "success")
-        else:
-            ProgressIndicators.print_step(f"Partial upload success: {successful_uploads}/{len(upload_operations)}", "warning")
+        # if successful_uploads == len(upload_operations):
+        #     ProgressIndicators.print_step("All data uploaded to Supabase successfully", "success")
+        # else:
+        #     ProgressIndicators.print_step(f"Partial upload success: {successful_uploads}/{len(upload_operations)}", "warning")
 
         ProgressIndicators.print_summary_box(
             f"💰 MUSD LOAN SUMMARY STATISTICS 💰",
@@ -504,7 +492,6 @@ def main():
         traceback.print_exc()
         print(f"{'─' * 50}")
         raise
-
 
 if __name__ == "__main__":
     results = main()

@@ -152,9 +152,7 @@ def main():
         # Upload raw data to BigQuery
         ProgressIndicators.print_step("Uploading raw swap data to BigQuery", "start")
         if raw_swap_data is not None and len(raw_swap_data) > 0:
-            raw_swap_data_copy = raw_swap_data.copy()
-            raw_swap_data_copy['id'] = range(1, len(raw_swap_data_copy) + 1)
-            bq.update_table(raw_swap_data_copy, 'raw_data', 'swaps_raw')
+            bq.update_table(raw_swap_data, 'raw_data', 'swaps_raw', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded raw swap data to BigQuery", "success")
 
         # Clean the swap data
@@ -163,9 +161,7 @@ def main():
         # Upload cleaned swaps to BigQuery
         ProgressIndicators.print_step("Uploading cleaned swap data to BigQuery", "start")
         if swaps_df_clean is not None and len(swaps_df_clean) > 0:
-            swaps_clean_copy = swaps_df_clean.copy()
-            swaps_clean_copy['id'] = range(1, len(swaps_clean_copy) + 1)
-            bq.update_table(swaps_clean_copy, 'staging', 'swaps_clean')
+            bq.update_table(swaps_df_clean, 'staging', 'swaps_clean', 'transactionHash_')
             ProgressIndicators.print_step("Uploaded clean swap data to BigQuery", "success")
 
         # Create daily aggregations
@@ -179,22 +175,20 @@ def main():
         ProgressIndicators.print_step("Uploading aggregated swap data to BigQuery", "start")
         
         datasets_to_upload = [
-            (daily_swaps, 'daily_swaps'),
-            (daily_swaps_by_pool, 'daily_swaps_by_pool'),
-            (pool_summary, 'swaps_by_pool')
+            (daily_swaps, 'daily_swaps', 'timestamp_'),
+            (daily_swaps_by_pool, 'daily_swaps_by_pool', 'timestamp_'),
+            (pool_summary, 'swaps_by_pool', ['pool'])
         ]
 
-        for dataset, table_name in datasets_to_upload:
+        for dataset, table_name, id_col in datasets_to_upload:
             if dataset is not None and len(dataset) > 0:
                 if table_name == 'swaps_by_pool':
                     # Use upsert for summary statistics (updates existing pool rows)
-                    bq.upsert_table(dataset, 'staging', table_name, ['pool'])
+                    bq.upsert_table(dataset, 'staging', table_name, id_col)
                     ProgressIndicators.print_step(f"Upserted {table_name} to BigQuery", "success")
                 else:
                     # Use regular update for time-series data (appends new rows)
-                    dataset_with_id = dataset.copy()
-                    dataset_with_id['id'] = range(1, len(dataset_with_id) + 1)
-                    bq.update_table(dataset_with_id, 'staging', table_name)
+                    bq.update_table(dataset, 'staging', table_name, id_col)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # # Calculate summary statistics
