@@ -220,6 +220,41 @@ class MUSDQueries:
   }
 """
 
+  GET_REDEMPTIONS = """
+  query getRedemptions($skip: Int!) {
+      redemptions(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+    ) {
+      timestamp_
+      actualAmount
+      attemptedAmount
+      collateralFee
+      collateralSent
+      transactionHash_
+      block_number
+    }
+  }
+  """
+
+  GET_BORROW_FEES = """
+  query getBorrowFees ($skip: Int!) {
+    borrowingFeePaids (
+      orderBy: timestamp_
+      orderDirection: desc
+      first: 1000
+      skip: $skip
+    ){
+      timestamp_
+      fee
+      borrower
+      transactionHash_
+    }
+  }
+  """
+
 class BridgeQueries:
 
   GET_WORMHOLE_TXNS = """
@@ -295,19 +330,19 @@ class BridgeQueries:
 
 class VaultQueries:
   GET_VAULT_TRANSFERS = """
-query vaultTransfers($skip: Int!) {
-  transfers(
-    first: 1000
-    orderBy: timestamp_
-    orderDirection: desc
-    skip: $skip
-) {
-    timestamp_
-    from
-    to
-    value
-    transactionHash_
-    block_number
+  query vaultTransfers($skip: Int!) {
+    transfers(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+  ) {
+      timestamp_
+      from
+      to
+      value
+      transactionHash_
+      block_number
+    }
   }
-}
-"""
+  """

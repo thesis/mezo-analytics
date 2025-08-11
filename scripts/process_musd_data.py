@@ -5,10 +5,13 @@ import requests
 from mezo.currency_utils import format_musd_currency_columns, get_token_price
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
-from mezo.clients import SupabaseClient, BigQueryClient, SubgraphClient
+from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import MUSDQueries
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress, safe_operation
+from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
+################################################
+# Define helper functions
+################################################
 
 @with_progress("Cleaning loan data")
 def clean_loan_data(raw, sort_col, date_cols, currency_cols):
@@ -22,7 +25,6 @@ def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     df['count'] = 1
     return df
 
-
 @with_progress("Calculating collateralization ratios")
 def find_coll_ratio(df, token_id):
     """Computes the collateralization ratio"""
@@ -30,7 +32,6 @@ def find_coll_ratio(df, token_id):
     df['coll_usd'] = df['coll'] * usd
     df['coll_ratio'] = (df['coll_usd']/df['principal']).fillna(0)
     return df
-
 
 @with_progress("Filtering loan subsets")
 def get_loans_subset(df, operation: int, equals):
@@ -45,7 +46,6 @@ def get_loans_subset(df, operation: int, equals):
     elif equals is False:
         result = df_copy.loc[df_copy['operation'] != operation]
     return result
-
 
 @with_progress("Processing liquidation data")
 def process_liquidation_data(liquidations, troves_liquidated):
@@ -82,7 +82,6 @@ def process_liquidation_data(liquidations, troves_liquidated):
     liquidations_final['coll'] = liquidations_final['coll'].astype(float)
 
     return pd.DataFrame(liquidations_final)
-
 
 @with_progress("Creating daily loan aggregations")
 def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans):
@@ -185,7 +184,6 @@ def process_loan_adjustments(adjusted_loans):
     
     return final_adjusted_loans
 
-
 @with_progress("Fetching MUSD token data")
 def fetch_musd_token_data():
     """Fetch MUSD token transfers and metadata"""
@@ -242,12 +240,41 @@ def fetch_musd_token_data():
     
     return musd_token
 
+# @with_progress("Fetching redemptions data")
+# def get_redemptions():
+#     """
+#     Get redemption data for troves from the MUSD Trove Manager subgraph
+#     """
+#     musd = SubgraphClient(
+#         url=SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
+#         headers=SubgraphClient.SUBGRAPH_HEADERS
+#     )
+    
+#     print("🔍 Trying redemptions query...")
+#     try:
+#         redemptions_data = musd.fetch_subgraph_data(
+#             MUSDQueries.GET_REDEMPTIONS, 
+#             'redemptions'
+#         )
+    
+#         if redemptions_data:
+#             redemptions_df = pd.DataFrame(redemptions_data)
+#             print(f"✅ Found {len(redemptions_df)} redemption records")
+            
+#             return redemptions_df
+#         else:
+#             print("⚠️ redemptions query returned no data")
+#     except Exception as e:
+#         print(f"❌ redemptions query failed: {e}")
 
 def main():
     """Main function to process MUSD loan data."""
     ProgressIndicators.print_header("MUSD DATA PROCESSING PIPELINE")
 
     try:
+        ################################################
+        # Setup env and clients
+        ################################################
         # Load environment variables
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
@@ -255,12 +282,14 @@ def main():
         ProgressIndicators.print_step("Environment loaded successfully", "success")
 
         # Initialize clients
-        ProgressIndicators.print_step("Initializing database clients", "start")
-        supabase = SupabaseClient()
+        ProgressIndicators.print_step("Initializing BigQuery", "start")
         bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
-        ProgressIndicators.print_step("Database clients initialized", "success")
+        ProgressIndicators.print_step("BigQuery initialized", "success")
 
+        ################################################
         # Get raw data from subgraphs
+        ################################################
+
         ProgressIndicators.print_step("Fetching raw loan data from subgraphs", "start")
         raw_loans = SubgraphClient.get_subgraph_data(
             SubgraphClient.BORROWER_OPS_SUBGRAPH,
@@ -279,23 +308,59 @@ def main():
             MUSDQueries.GET_LIQUIDATED_TROVES,
             'troveLiquidateds'
         )
+
+        raw_redemptions = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
+            MUSDQueries.GET_REDEMPTIONS, 
+            'redemptions'
+        )
+
+        raw_fees = SubgraphClient.get_subgraph_data(
+            SubgraphClient.BORROWER_OPS_SUBGRAPH, 
+            MUSDQueries.GET_BORROW_FEES, 
+            'borrowingFeePaids'
+        )
         ProgressIndicators.print_step("Raw data fetched successfully", "success")
 
+        ################################################
         # Upload raw data to BigQuery
+        ################################################
+        
         ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
-        if raw_loans is not None and len(raw_loans) > 0:
-            bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw_loans to BigQuery", "success")
+        raw_datasets_to_upload = [
+            (raw_loans, 'musd_loans_raw', 'transactionHash_'),
+            (raw_liquidations, 'musd_liquidations_raw', 'transactionHash_'),
+            (raw_troves_liquidated, 'musd_troves_liquidated_raw', 'transactionHash_'),
+            (raw_redemptions, 'musd_redemptions_raw', 'transactionHash_'),
+            (raw_fees, 'musd_fees_raw', 'transactionHash_')
+        ]
 
-        if raw_liquidations is not None and len(raw_liquidations) > 0:
-            bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw_liquidations to BigQuery", "success")
+        for dataset, table_name, id_column in raw_datasets_to_upload:
+            if dataset is not None and len(dataset) > 0:
+                bq.update_table(dataset, 'raw_data', table_name, id_column)
+                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
-            bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw_troves_liquidated to BigQuery", "success")
+        # if raw_loans is not None and len(raw_loans) > 0:
+        #     bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw', 'transactionHash_')
+        #     ProgressIndicators.print_step("Uploaded raw_loans to BigQuery", "success")
 
+        # if raw_liquidations is not None and len(raw_liquidations) > 0:
+        #     bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw', 'transactionHash_')
+        #     ProgressIndicators.print_step("Uploaded raw_liquidations to BigQuery", "success")
+
+        # if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
+        #     bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw', 'transactionHash_')
+        #     ProgressIndicators.print_step("Uploaded raw_troves_liquidated to BigQuery", "success")
+
+        # if raw_redemptions is not None and len(raw_redemptions) > 0:
+        #     bq.update_table(raw_redemptions, 'raw_data', 'musd_redemptions_raw', 'transactionHash_')
+        #     ProgressIndicators.print_step("Uploaded raw_redemptions to BigQuery", "success")
+
+        ################################################
         # Clean and process loan data
+        ################################################
+        
+        # all loans
         loans = clean_loan_data(
             raw_loans,
             sort_col='timestamp_', 
@@ -305,13 +370,7 @@ def main():
 
         loans = find_coll_ratio(loans, 'bitcoin')
 
-        # Upload cleaned loans to BigQuery
-        ProgressIndicators.print_step("Uploading cleaned loan data to BigQuery", "start")
-        if loans is not None and len(loans) > 0:
-            bq.update_table(loans, 'staging', 'all_loans_clean', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded all_loans_clean to BigQuery", "success")
-
-        # Process liquidations
+        # liquidated loans
         liquidations = clean_loan_data(
             raw_liquidations,
             sort_col='timestamp_',
@@ -327,6 +386,18 @@ def main():
         )
 
         liquidations_final = process_liquidation_data(liquidations, troves_liquidated)
+
+        # redemptions
+        redemptions = clean_loan_data(
+            raw_redemptions,
+            sort_col='timestamp_',
+            date_cols=['timestamp_'],
+            currency_cols=['actualAmount', 'attemptedAmount', 'collateralFee', 'collateralSent']
+        )
+        
+        ################################################
+        # Create subsets of loan df by type of txn
+        ################################################
 
         # Create loan subsets
         new_loans = get_loans_subset(loans, 0, True)
@@ -346,14 +417,21 @@ def main():
         # Process loan adjustments
         final_adjusted_loans = process_loan_adjustments(adjusted_loans)
 
-        # Upload loan subset data to BigQuery
+        ################################################
+        # Upload clean and subset dfs to BigQuery
+        ################################################
+
         ProgressIndicators.print_step("Uploading loan subset data to BigQuery", "start")
+
         datasets_to_upload = [
+            (loans, 'all_loans_clean', 'transactionHash_'),
             (new_loans, 'new_loans_clean', 'transactionHash_'),
             (closed_loans, 'closed_loans_clean', 'transactionHash_'),
             (latest_open_loans, 'open_loans_clean', 'transactionHash_'),
             (final_adjusted_loans, 'adjusted_loans_clean', 'transactionHash_'),
-            (liquidations_final, 'liquidated_loans_clean', 'transactionHash_')
+            (liquidations_final, 'liquidated_loans_clean', 'transactionHash_'),
+            (refinanced_loans, 'refinanced_loans_clean', 'transactionHash_'),
+            (redemptions, 'redemptions_clean', 'transactionHash_')
         ]
 
         for dataset, table_name, id_column in datasets_to_upload:
@@ -361,10 +439,16 @@ def main():
                 bq.update_table(dataset, 'staging', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
+        ################################ 
         # Create daily aggregations
+        ################################
+
         final_daily_musd = create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans)
 
+        ################################################
         # Upload daily loan data to BigQuery
+        ################################################
+        
         ProgressIndicators.print_step("Uploading daily loans data to BigQuery", "start")
         if final_daily_musd is not None and len(final_daily_musd) > 0:
             bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean', 'date')
@@ -374,6 +458,9 @@ def main():
         ProgressIndicators.print_step("Calculating summary statistics", "start")
         
         # All-time stats
+        btc_price = get_token_price('bitcoin')
+        musd_token = fetch_musd_token_data()
+
         all_time_musd_borrowed = new_loans['principal'].sum()
         all_time_musd_loans = new_loans['count'].sum()
         all_time_musd_borrowers = new_loans['borrower'].nunique()
@@ -386,12 +473,9 @@ def main():
         interest_liquidated = liquidations_final['interest'].sum()
         coll_liquidated = liquidations_final['coll'].sum()
 
-        btc_price = get_token_price('bitcoin')
-
         system_coll = latest_open_loans['coll'].sum()
         system_debt = latest_open_loans['principal'].sum() + latest_open_loans['interest'].sum()
         TCR = ((system_coll * btc_price) / system_debt) * 100
-
 
         # Create summary dataframes
         musd_summary = pd.DataFrame([{
@@ -407,61 +491,7 @@ def main():
             'interest_liquidated': interest_liquidated,
             'collateral_liquidated': coll_liquidated
         }])
-
         ProgressIndicators.print_step("Summary statistics calculated", "success")
-
-        # Fetch MUSD token data
-        musd_token = fetch_musd_token_data()
-
-        # # Upload to Supabase with proper error handling
-        # ProgressIndicators.print_step("Uploading to Supabase", "start")
-        
-        # # Clean data for Supabase compatibility
-        # def clean_dataframe_for_upload(df):
-        #     """Clean DataFrame for Supabase upload."""
-        #     import numpy as np
-        #     cleaned_df = df.copy()
-        #     # Convert column names to lowercase
-        #     cleaned_df.columns = [col.lower() for col in df.columns]
-        #     # Convert timestamp to string
-        #     for col in cleaned_df.columns:
-        #         if 'time' in col or 'date' in col or col.endswith('_'):
-        #             cleaned_df[col] = cleaned_df[col].astype(str)
-        #     # Replace NaN with None
-        #     cleaned_df = cleaned_df.replace({np.nan: None})
-        #     return cleaned_df
-
-        # # Convert integer columns that may have become floats back to integers
-        # integer_columns = ['loans_opened', 'borrowers', 'loans_closed', 'closers', 'loans_adjusted', 'adjusters']
-        # for col in integer_columns:
-        #     if col in final_daily_musd.columns:
-        #         final_daily_musd[col] = final_daily_musd[col].astype(int)
-
-        # upload_operations = [
-        #     ('mainnet_musd_daily', clean_dataframe_for_upload(final_daily_musd)),
-        #     ('mainnet_musd_borrow_summary', clean_dataframe_for_upload(musd_summary)),
-        #     ('mainnet_musd_token_summary', clean_dataframe_for_upload(musd_token))
-        # ]
-
-        # successful_uploads = 0
-        # for table_name, data in upload_operations:
-        #     try:
-        #         if supabase.ensure_table_exists_for_dataframe(table_name, data):
-        #             if 'token_summary' in table_name:
-        #                 supabase.append_to_supabase(table_name, data)
-        #             else:
-        #                 supabase.update_supabase(table_name, data)
-        #             ProgressIndicators.print_step(f"Uploaded to {table_name}", "success")
-        #             successful_uploads += 1
-        #         else:
-        #             ProgressIndicators.print_step(f"Failed to create/verify table {table_name}", "error")
-        #     except Exception as e:
-        #         ProgressIndicators.print_step(f"Failed to upload to {table_name}: {str(e)}", "error")
-
-        # if successful_uploads == len(upload_operations):
-        #     ProgressIndicators.print_step("All data uploaded to Supabase successfully", "success")
-        # else:
-        #     ProgressIndicators.print_step(f"Partial upload success: {successful_uploads}/{len(upload_operations)}", "warning")
 
         ProgressIndicators.print_summary_box(
             f"💰 MUSD LOAN SUMMARY STATISTICS 💰",
