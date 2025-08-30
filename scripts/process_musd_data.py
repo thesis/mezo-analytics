@@ -337,6 +337,7 @@ def main():
 
         for dataset, table_name, id_column in raw_datasets_to_upload:
             if dataset is not None and len(dataset) > 0:
+                dataset['transactionHash_'] = dataset['transactionHash_'].astype(str)
                 bq.update_table(dataset, 'raw_data', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 

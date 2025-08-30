@@ -93,7 +93,7 @@ class SubgraphClient:
     SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
     POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
     TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
-
+    WORMHOLE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn'
 class SupabaseClient:
 
     def __init__(self):
@@ -120,12 +120,22 @@ class SupabaseClient:
         return df
         
     def update_supabase(self, supabase_table, df):
+        """
+        DEPRECATED: This method has problematic ID handling.
+        Use append_to_supabase() instead for proper incremental uploads.
+        
+        This method overwrites IDs starting from 1, which can cause conflicts.
+        """
+        print("⚠️ Warning: update_supabase() has problematic ID handling. Consider using append_to_supabase() instead.")
+        
         # Convert NaN to None (Supabase can't handle NaN in JSON)
-        df = df.replace({np.nan: None})
+        df_copy = df.replace({np.nan: None})
 
-        # add an 'id' column based on the record count
-        df['id'] = range(1, len(df) + 1)
-        records = df.to_dict(orient='records')
+        # Add ID column if it doesn't exist - but this approach is problematic
+        if 'id' not in df_copy.columns:
+            df_copy['id'] = range(1, len(df_copy) + 1)
+        
+        records = df_copy.to_dict(orient='records')
         
         # this is going to add an ID column to track unique transfers. upsert to make sure only new ones are added
         response = (

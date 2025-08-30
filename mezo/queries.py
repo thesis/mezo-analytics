@@ -126,7 +126,6 @@ class MUSDQueries:
             first: 1000
             skip: $skip
         ) {
-            id
             timestamp_
             borrower
             debt
@@ -202,6 +201,24 @@ class MUSDQueries:
     }
     """
   
+  GET_FEES_FOR_SWAPS = """
+  query getSwapFees($skip: Int!) {
+    fees(
+    first: 1000
+    orderBy: timestamp_
+    orderDirection: desc
+    skip: $skip
+    ) {
+      timestamp_
+      sender
+      amount0
+      amount1
+      contractId_
+      transactionHash_
+    }
+  }
+  """
+
   GET_MUSD_PRICE = """
   query getMusdPrice($skip: Int!) {
     syncs(
@@ -218,7 +235,7 @@ class MUSDQueries:
       block_number
     }
   }
-"""
+  """
 
   GET_REDEMPTIONS = """
   query getRedemptions($skip: Int!) {
@@ -251,6 +268,44 @@ class MUSDQueries:
       fee
       borrower
       transactionHash_
+    }
+  }
+  """
+
+  GET_MUSD_MINTS = """
+    query getMUSDMints($skip: Int!) {
+      transfers(
+        first: 1000
+        orderBy: timestamp_
+        orderDirection: desc
+        skip: $skip
+        where: {from_contains_nocase: "0x0000000000000000000000000000000000000000"}
+      ) {
+        timestamp_
+        from
+        to
+        value
+        transactionHash_
+        block_number
+      }
+    }
+    """
+  
+  GET_MUSD_BURNS = """
+  query getMUSDBurns($skip: Int!) {
+    transfers(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+      where: {to_contains_nocase: "0x0000000000000000000000000000000000000000"}
+    ) {
+      timestamp_
+      from
+      to
+      value
+      transactionHash_
+      block_number
     }
   }
   """

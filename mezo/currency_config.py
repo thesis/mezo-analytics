@@ -89,7 +89,8 @@ MUSD_MARKET_MAP = {
     '1003' : 'bitrefill_25',
     '1004' : 'bitrefill_50',
     '1005' : 'bitrefill_100', 
-    '1006' : 'bitrefill_200'
+    '1006' : 'bitrefill_200',
+    '1007' : 'bitrefill_1000'
 }
 
 # Token mapping for Tigris pools
