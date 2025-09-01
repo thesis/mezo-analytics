@@ -37,54 +37,8 @@ env:
   PYTHON_VERSION: 3.13
 
 jobs:
-  update-requirements:
-    runs-on: ubuntu-latest
-    outputs:
-      requirements-updated: ${{ steps.update.outputs.updated }}
-    
-    steps:
-    - name: 🔄 Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: 📦 Install current dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: 🔍 Update requirements if needed
-      id: update
-      run: |
-        echo "🔄 Checking if requirements need updating..."
-        
-        # Run the requirements updater
-        python scripts/update_requirements.py
-        
-        # Check if git detects any changes
-        if git diff --quiet requirements.txt; then
-            echo "✅ No requirements updates needed"
-            echo "updated=false" >> $GITHUB_OUTPUT
-        else
-            echo "📝 Requirements were updated"
-            echo "updated=true" >> $GITHUB_OUTPUT
-            
-            # Commit the changes
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git add requirements.txt
-            git commit -m "chore: auto-update requirements.txt before data processing"
-            git push
-        fi
-
   process-bridge-data:
     runs-on: ubuntu-latest
-    needs: update-requirements
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_bridge_data == 'true')
     
     steps:
@@ -119,7 +73,6 @@ jobs:
 
   process-musd-data:
     runs-on: ubuntu-latest
-    needs: update-requirements
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_musd_data == 'true')
     
     steps:
@@ -154,7 +107,6 @@ jobs:
 
   process-market-data:
     runs-on: ubuntu-latest
-    needs: update-requirements
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_market_data == 'true')
     
     steps:
@@ -189,7 +141,6 @@ jobs:
 
   process-swaps-data:
     runs-on: ubuntu-latest
-    needs: update-requirements
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_swaps_data == 'true')
     
     steps:
@@ -224,7 +175,6 @@ jobs:
 
   process-pools-data:
     runs-on: ubuntu-latest
-    needs: update-requirements
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_pools_data == 'true')
     
     steps:
