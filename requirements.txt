@@ -1,51 +1,26 @@
 -e .
 
 # Core data processing
-pandas>=2.3.0
-numpy>=2.3.0
+numpy>=2.3.1
+pandas>=2.3.1
 
 # Web3 and blockchain
-web3>=7.0.0
+web3>=7.12.1
 
 # HTTP requests
 requests>=2.32.4
 
 # Environment management
-python-dotenv>=1.0.0
+python-dotenv>=1.1.1
 
 # Database and API clients
-google-cloud-bigquery>=3.30.0
-google-auth>=2.30.0
-google-api-core>=2.20.0
-supabase>=2.15.3
-pyarrow>=20.0.0
-db-dtypes>=1.4.0
+google-cloud-bigquery>=3.34.0
+supabase>=2.16.0
 
 # Data visualization
-matplotlib>=3.7.0
-
-# Jupyter and development
-ipython>=9.3.0
-jupyterlab>=4.4.0
-notebook>=7.0.0
-jupyter>=1.1.0
-
-# Development and testing
-pytest>=8.4.0
-
-# Code quality
-ruff>=0.1.0
-
-# Machine learning (optional)
-scikit-learn>=1.3.0
-
-# Documentation
-mkdocs>=1.5.0
-
-# Development setup
-pip>=23.0.0
+matplotlib>=3.10.3
 
 # Built-in modules (no install needed):
 # - hashlib, json, time, os, sys, subprocess
 # - decimal, datetime, functools, typing, pathlib
-# - traceback
+# - traceback, collections, itertools, re

@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Set, List, Tuple
-import pkg_resources
+# pkg_resources is deprecated - using pip freeze instead for package versions
 
 
 def get_project_root() -> Path:
