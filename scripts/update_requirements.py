@@ -221,12 +221,41 @@ def backup_requirements(requirements_path: Path) -> None:
         print(f"📋 Backed up current requirements.txt to {backup_path}")
 
 
+def parse_existing_requirements(requirements_path: Path) -> Dict[str, str]:
+    """Parse existing requirements.txt to preserve existing packages."""
+    existing_packages = {}
+    
+    if not requirements_path.exists():
+        return existing_packages
+        
+    try:
+        content = requirements_path.read_text()
+        for line in content.split('\n'):
+            line = line.strip()
+            if line and not line.startswith('#') and not line.startswith('-e'):
+                if '>=' in line:
+                    package, version = line.split('>=', 1)
+                    existing_packages[package.strip()] = version.strip()
+                elif '==' in line:
+                    package, version = line.split('==', 1)
+                    existing_packages[package.strip()] = version.strip()
+    except Exception as e:
+        print(f"Warning: Could not parse existing requirements: {e}")
+        
+    return existing_packages
+
+
 def main():
     """Main function to update requirements.txt."""
     print("🔄 Updating requirements.txt...")
     
     project_root = get_project_root()
     requirements_path = project_root / 'requirements.txt'
+    
+    # Parse existing requirements first
+    print("📋 Parsing existing requirements...")
+    existing_packages = parse_existing_requirements(requirements_path)
+    print(f"Found {len(existing_packages)} existing packages")
     
     # Backup current requirements
     backup_requirements(requirements_path)
@@ -247,8 +276,10 @@ def main():
     print("📦 Getting installed package versions...")
     installed = get_installed_packages()
     
-    # Map imports to actual packages and get versions
-    required_packages = {}
+    # Start with existing packages to preserve transitive dependencies
+    required_packages = existing_packages.copy()
+    
+    # Map imports to actual packages and get versions (update existing or add new)
     for imp in filtered_imports:
         package_name = package_mapping.get(imp, imp)
         
@@ -262,12 +293,21 @@ def main():
         
         for name in possible_names:
             if name in installed:
-                required_packages[name] = installed[name]
+                # Update with current installed version if newer
+                current_version = installed[name]
+                if name not in required_packages:
+                    required_packages[name] = current_version
+                    print(f"➕ Added new package: {name}>={current_version}")
+                else:
+                    # Keep existing version constraints (don't downgrade)
+                    existing_version = required_packages[name]
+                    if current_version != existing_version:
+                        print(f"🔄 Keeping existing constraint: {name}>={existing_version} (installed: {current_version})")
                 break
         else:
             print(f"⚠️ Warning: Could not find installed version for '{imp}' (mapped to '{package_name}')")
     
-    print(f"📊 Found versions for {len(required_packages)} packages")
+    print(f"📊 Final requirements with {len(required_packages)} packages")
     
     # Categorize packages
     categorized = categorize_packages(required_packages)
