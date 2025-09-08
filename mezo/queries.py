@@ -272,6 +272,24 @@ class MUSDQueries:
   }
   """
 
+  GET_MUSD_TOKEN_TRANSFERS = """
+    query getMUSDMints($skip: Int!) {
+      transfers(
+        first: 1000
+        orderBy: timestamp_
+        orderDirection: desc
+        skip: $skip
+      ) {
+        timestamp_
+        from
+        to
+        value
+        transactionHash_
+        block_number
+      }
+    }
+    """
+
   GET_MUSD_MINTS = """
     query getMUSDMints($skip: Int!) {
       transfers(

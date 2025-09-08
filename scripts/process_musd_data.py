@@ -143,6 +143,25 @@ def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans
     
     return final_daily_musd
 
+def create_daily_token_data(mints, burns):
+    daily_mints = mints.groupby(['timestamp_']).agg(
+        mints = ('from', 'count'),
+        minters = ('to', lambda x: x.nunique()),
+        amt_minted = ('value', 'sum')
+    ).reset_index()
+
+    daily_burns = burns.groupby(['timestamp_']).agg(
+        burns = ('from', 'count'),
+        burners = ('from', lambda x: x.nunique()),
+        amt_burned = ('value', 'sum')
+    ).reset_index()
+
+    daily_df = pd.merge(daily_mints, daily_burns, how='outer', on='timestamp_').fillna(0)
+    daily_df = add_rolling_values(daily_df, 7, cols=['amt_minted', 'amt_burned'])
+    daily_df = add_cumulative_columns(daily_df, cols=['mints', 'amt_minted', 'burns', 'amt_burned']).fillna(0)
+    
+    return daily_df
+
 @with_progress("Processing loan adjustments")
 def process_loan_adjustments(adjusted_loans):
     """Break down adjusted loan types for analysis"""
@@ -240,32 +259,39 @@ def fetch_musd_token_data():
     
     return musd_token
 
-# @with_progress("Fetching redemptions data")
-# def get_redemptions():
-#     """
-#     Get redemption data for troves from the MUSD Trove Manager subgraph
-#     """
-#     musd = SubgraphClient(
-#         url=SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
-#         headers=SubgraphClient.SUBGRAPH_HEADERS
-#     )
+@with_progress("Calculate liquidation risk per loan")
+def add_loan_risk(df):
+    df['liquidation_buffer'] = df['coll_ratio'] - 1.3
+
+    df['risk_category'] = pd.cut(
+        df['liquidation_buffer'],
+        bins=[-float('inf'), 0, 0.1, 0.3, float('inf')],
+        labels=['Critical', 'High', 'Medium', 'Low']
+    )
+
+    return df
+
+@with_progress("Create risk distribution for MUSD loans")
+def create_risk_distribution(df, risk_col):
     
-#     print("🔍 Trying redemptions query...")
-#     try:
-#         redemptions_data = musd.fetch_subgraph_data(
-#             MUSDQueries.GET_REDEMPTIONS, 
-#             'redemptions'
-#         )
+    # Risk categories
+    df['risk_category'] = pd.cut(
+        df[risk_col],
+        bins=[-float('inf'), 0, 0.1, 0.3, float('inf')],
+        labels=['Critical', 'High', 'Medium', 'Low']
+    )
     
-#         if redemptions_data:
-#             redemptions_df = pd.DataFrame(redemptions_data)
-#             print(f"✅ Found {len(redemptions_df)} redemption records")
-            
-#             return redemptions_df
-#         else:
-#             print("⚠️ redemptions query returned no data")
-#     except Exception as e:
-#         print(f"❌ redemptions query failed: {e}")
+    # Distribution analysis
+    risk_distribution = df.groupby('risk_category', observed=False).agg({
+        'principal': ['count', 'sum'],
+        'coll': 'sum',
+        'liquidation_buffer': 'mean'
+    }).reset_index()
+
+    risk_distribution.columns = ['_'.join(col).strip() 
+                                 for col in risk_distribution.columns.values]
+
+    return risk_distribution
 
 def main():
     """Main function to process MUSD loan data."""
@@ -275,6 +301,7 @@ def main():
         ################################################
         # Setup env and clients
         ################################################
+        
         # Load environment variables
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
@@ -320,6 +347,19 @@ def main():
             MUSDQueries.GET_BORROW_FEES, 
             'borrowingFeePaids'
         )
+
+        raw_mints = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MUSD_TOKEN_SUBGRAPH, 
+            MUSDQueries.GET_MUSD_MINTS, 
+            'transfers'
+        )
+
+        raw_burns = SubgraphClient.get_subgraph_data(
+            SubgraphClient.MUSD_TOKEN_SUBGRAPH, 
+            MUSDQueries.GET_MUSD_BURNS, 
+            'transfers'
+        )
+
         ProgressIndicators.print_step("Raw data fetched successfully", "success")
 
         ################################################
@@ -332,7 +372,9 @@ def main():
             (raw_liquidations, 'musd_liquidations_raw', 'transactionHash_'),
             (raw_troves_liquidated, 'musd_troves_liquidated_raw', 'transactionHash_'),
             (raw_redemptions, 'musd_redemptions_raw', 'transactionHash_'),
-            (raw_fees, 'musd_fees_raw', 'transactionHash_')
+            (raw_fees, 'musd_fees_raw', 'transactionHash_'),
+            (raw_mints, 'musd_mints_raw', 'transactionHash_'),
+            (raw_burns, 'musd_burns_raw', 'transactionHash_')
         ]
 
         for dataset, table_name, id_column in raw_datasets_to_upload:
@@ -340,22 +382,6 @@ def main():
                 dataset['transactionHash_'] = dataset['transactionHash_'].astype(str)
                 bq.update_table(dataset, 'raw_data', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-        # if raw_loans is not None and len(raw_loans) > 0:
-        #     bq.update_table(raw_loans, 'raw_data', 'musd_loans_raw', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded raw_loans to BigQuery", "success")
-
-        # if raw_liquidations is not None and len(raw_liquidations) > 0:
-        #     bq.update_table(raw_liquidations, 'raw_data', 'musd_liquidations_raw', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded raw_liquidations to BigQuery", "success")
-
-        # if raw_troves_liquidated is not None and len(raw_troves_liquidated) > 0:
-        #     bq.update_table(raw_troves_liquidated, 'raw_data', 'musd_troves_liquidated_raw', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded raw_troves_liquidated to BigQuery", "success")
-
-        # if raw_redemptions is not None and len(raw_redemptions) > 0:
-        #     bq.update_table(raw_redemptions, 'raw_data', 'musd_redemptions_raw', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded raw_redemptions to BigQuery", "success")
 
         ################################################
         # Clean and process loan data
@@ -396,6 +422,20 @@ def main():
             currency_cols=['actualAmount', 'attemptedAmount', 'collateralFee', 'collateralSent']
         )
         
+        # mints and burns
+        mints = clean_loan_data(
+            raw_mints,
+            sort_col='timestamp_',
+            date_cols=['timestamp_'],
+            currency_cols=['value']
+        )
+        burns = clean_loan_data(
+            raw_burns,
+            sort_col='timestamp_',
+            date_cols=['timestamp_'],
+            currency_cols=['value']
+        )        
+
         ################################################
         # Create subsets of loan df by type of txn
         ################################################
@@ -415,6 +455,9 @@ def main():
         latest_open_loans = get_loans_subset(latest_loans, 1, False)
         latest_open_loans = latest_open_loans[~latest_open_loans['borrower'].isin(liquidated_borrowers)]
 
+        # Calculate loan risk category
+        latest_open_loans = add_loan_risk(latest_open_loans)
+
         # Process loan adjustments
         final_adjusted_loans = process_loan_adjustments(adjusted_loans)
 
@@ -432,7 +475,9 @@ def main():
             (final_adjusted_loans, 'adjusted_loans_clean', 'transactionHash_'),
             (liquidations_final, 'liquidated_loans_clean', 'transactionHash_'),
             (refinanced_loans, 'refinanced_loans_clean', 'transactionHash_'),
-            (redemptions, 'redemptions_clean', 'transactionHash_')
+            (redemptions, 'redemptions_clean', 'transactionHash_'),
+            (mints, 'musd_mints_clean', 'transactionHash_'),
+            (burns, 'musd_burns_clean', 'transactionHash_')
         ]
 
         for dataset, table_name, id_column in datasets_to_upload:
@@ -445,6 +490,7 @@ def main():
         ################################
 
         final_daily_musd = create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans)
+        daily_mints_and_burns = create_daily_token_data(mints, burns)
 
         ################################################
         # Upload daily loan data to BigQuery
@@ -454,6 +500,30 @@ def main():
         if final_daily_musd is not None and len(final_daily_musd) > 0:
             bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean', 'date')
             ProgressIndicators.print_step("Uploaded final_daily_musd to BigQuery", "success")
+
+        ProgressIndicators.print_step("Uploading daily mint and burn data to BigQuery", "start")
+        if daily_mints_and_burns is not None and len(daily_mints_and_burns) > 0:
+            bq.update_table(daily_mints_and_burns, 'marts', 'daily_mints_and_burns', 'timestamp_')
+            ProgressIndicators.print_step("Uploaded daily_mints_and_burns to BigQuery", "success")
+
+        ################################ 
+        # Create risk aggregations
+        ################################
+
+        risk_distribution = create_risk_distribution(latest_open_loans, 'liquidation_buffer')
+        
+        ################################ 
+        # Upload agg to BigQuery 
+        ################################
+
+        ProgressIndicators.print_step("Uploading risk distribution to BigQuery", "start")
+        if risk_distribution is not None and len(risk_distribution) > 0:
+            bq.upsert_table_by_id(risk_distribution, 'marts', 'risk_distribution', 'risk_category_')
+            ProgressIndicators.print_step("Uploaded risk distribution to BigQuery", "success")
+
+        ################################ 
+        # Summarize findings and print
+        ################################
 
         # Calculate summary statistics
         ProgressIndicators.print_step("Calculating summary statistics", "start")
@@ -497,6 +567,7 @@ def main():
         ProgressIndicators.print_summary_box(
             f"💰 MUSD LOAN SUMMARY STATISTICS 💰",
             {
+                "BTC Price": btc_price,
                 "Total MUSD Borrowed": all_time_musd_borrowed,
                 "Total Loans": all_time_musd_loans,
                 "Unique Borrowers": all_time_musd_borrowers,
