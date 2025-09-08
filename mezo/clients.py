@@ -94,6 +94,7 @@ class SubgraphClient:
     POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
     TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
     WORMHOLE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn'
+
 class SupabaseClient:
 
     def __init__(self):
@@ -562,6 +563,53 @@ class BigQueryClient:
         )
         job.result()
         print(f"📤 Successfully uploaded {new_df.shape[0]} new rows to {dataset_id}.{table_id}")
+
+    def upsert_table_by_id(self, df: pd.DataFrame, dataset_id: str, table_id: str, id_column: str):
+        """
+        Update a BigQuery table with new data using an existing ID column for deduplication.
+        
+        - If table doesn't exist: creates the table
+        - If table exists: updates existing rows and inserts new rows based on ID column
+        
+        This function provides the same interface as update_table() but performs upserts instead of appends.
+        
+        Args:
+            df: DataFrame to upload (must contain the id_column)
+            dataset_id: BigQuery dataset ID  
+            table_id: BigQuery table ID
+            id_column: Name of the existing column to use as unique ID for upsert operations
+        """
+        # Validate that ID column exists
+        if id_column not in df.columns:
+            raise ValueError(f"ID column '{id_column}' not found in DataFrame. Available columns: {list(df.columns)}")
+        
+        print(f"📊 Using column '{id_column}' as unique ID for upsert operations")
+        
+        # Check if table exists
+        if not self.table_exists(dataset_id, table_id):
+            print(f"📋 Table {dataset_id}.{table_id} does not exist. Creating...")
+            self.create_table(df, dataset_id, table_id)
+            return
+        
+        # Table exists - use upsert functionality to update existing rows and insert new ones
+        print(f"📋 Table {dataset_id}.{table_id} exists. Performing upsert operations...")
+        
+        try:
+            # Use the existing upsert_table method with the id_column as the key
+            self.upsert_table(df, dataset_id, table_id, [id_column])
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if f"unrecognized name: {id_column}" in error_msg or f"column {id_column} does not exist" in error_msg:
+                print(f"⚠️ Table exists but missing '{id_column}' column. Recreating table...")
+                table_ref = self.client.dataset(dataset_id).table(table_id)
+                self.client.delete_table(table_ref)
+                self.create_table(df, dataset_id, table_id)
+                return
+            else:
+                print(f"❌ Could not perform upsert operations: {e}")
+                print(f"❌ Skipping upload to avoid data corruption")
+                return
 
 class Web3Client:
     """A class to handle direct queries to the blockchain"""
