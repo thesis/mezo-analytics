@@ -369,7 +369,7 @@ class BigQueryClient:
         
         credentials_json = os.getenv(key)
         if not credentials_json:
-            raise ValueError("Missing {key} in .env")
+            raise ValueError(f"Missing {key} in .env")
         
         # Parse JSON credentials
         credentials_info = json.loads(credentials_json)
