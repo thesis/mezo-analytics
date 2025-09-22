@@ -86,6 +86,7 @@ def process_liquidation_data(liquidations, troves_liquidated):
 @with_progress("Creating daily loan aggregations")
 def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans):
     """Create daily aggregated loan data"""
+    
     daily_new_loans = new_loans.groupby(['timestamp_']).agg(
         loans_opened = ('count', 'sum'),
         borrowers = ('borrower', lambda x: x.nunique()),
@@ -134,14 +135,14 @@ def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans
     }
 
     daily_loans_merged = daily_loans_merged.rename(columns=cols)
-
+    daily_loans_merged = daily_loans_merged.sort_values(by='date')
     daily_musd_final = add_rolling_values(daily_loans_merged, 30, ['net_musd', 'net_interest', 'net_coll']).fillna(0)
-    daily_musd_final_2 = add_cumulative_columns(daily_musd_final, ['net_musd', 'net_interest', 'net_coll'])
-    daily_musd_final_3 = add_pct_change_columns(daily_musd_final_2, ['net_musd', 'net_interest', 'net_coll'], 'daily').fillna(0)
-    final_daily_musd = daily_musd_final_3.replace([float('inf'), -float('inf')], 0)
-    final_daily_musd['date'] = pd.to_datetime(final_daily_musd['date']).dt.strftime('%Y-%m-%d')
+    daily_musd_final = add_cumulative_columns(daily_musd_final, ['net_musd', 'net_interest', 'net_coll'])
+    daily_musd_final = add_pct_change_columns(daily_musd_final, ['net_musd', 'net_interest', 'net_coll'], 'daily').fillna(0)
+    daily_musd_final = daily_musd_final.replace([float('inf'), -float('inf')], 0)
+    daily_musd_final['date'] = pd.to_datetime(daily_musd_final['date']).dt.strftime('%Y-%m-%d')
     
-    return final_daily_musd
+    return daily_musd_final
 
 def create_daily_token_data(mints, burns):
     daily_mints = mints.groupby(['timestamp_']).agg(
@@ -196,11 +197,15 @@ def process_loan_adjustments(adjusted_loans):
     # Create final_adjusted_loans dataframe with type column
     final_adjusted_loans = pd.concat([
         increased_loans,
-        coll_increased, 
+        coll_increased,
         coll_decreased,
         principal_decreased
     ], ignore_index=True)
-    
+
+    # Create composite unique identifier to handle cases where same transaction
+    # appears in multiple categories (e.g., both principal and collateral increase)
+    # final_adjusted_loans['composite_id'] = final_adjusted_loans['transactionHash_'] + '_' + final_adjusted_loans['type'].astype(str)
+
     return final_adjusted_loans
 
 @with_progress("Fetching MUSD token data")
@@ -452,8 +457,8 @@ def main():
 
         # Get latest loans
         latest_loans = loans.drop_duplicates(subset='borrower', keep='first')
-        latest_open_loans = get_loans_subset(latest_loans, 1, False)
-        latest_open_loans = latest_open_loans[~latest_open_loans['borrower'].isin(liquidated_borrowers)]
+        latest_open_loans = get_loans_subset(latest_loans, 1, False) # remove closed loans
+        latest_open_loans = latest_open_loans[~latest_open_loans['borrower'].isin(liquidated_borrowers)] # remove liquidated loans
 
         # Calculate loan risk category
         latest_open_loans = add_loan_risk(latest_open_loans)
