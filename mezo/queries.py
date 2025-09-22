@@ -68,7 +68,7 @@ class PoolQueries:
     feesStats_collection(
       interval: day
       first: 1000
-      orderBy: timestamp_ 
+      orderBy: timestamp
       orderDirection: desc
       skip: $skip
     ) {
@@ -400,6 +400,26 @@ class BridgeQueries:
     }
   }
   """
+
+  GET_NATIVE_WITHDRAWALS = """  
+  query getNativeWithdrawals($skip: Int!) {
+    assetsUnlockeds(
+      first: 1000
+      orderBy: timestamp_ 
+      orderDirection: desc
+      skip: $skip
+    ) {
+      timestamp_
+      amount
+      token
+      chain
+      sender
+      recipient
+      contractId_
+      transactionHash_
+      id
+    }
+  }"""
 
 class VaultQueries:
   GET_VAULT_TRANSFERS = """

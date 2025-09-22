@@ -98,5 +98,6 @@ TIGRIS_MAP = {
     'Volatile AMM - BTC/MUSD': 'btc_musd_pool',
     'Stable AMM - mUSDC/MUSD': 'musdc_musd_pool',
     'Stable AMM - MUSD/mUSDT': 'musd_musdt_pool',
-    'Stable AMM - mUSDC/mUSDT': 'musdc_musdt_pool'
+    'Stable AMM - mUSDC/mUSDT': 'musdc_musdt_pool',
+    'Volatile AMM - mUSDC/BTC': 'musdc_btc_pool'
 }

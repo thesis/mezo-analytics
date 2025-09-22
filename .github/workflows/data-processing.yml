@@ -37,6 +37,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      run_vaults_data:
+        description: 'Run vaults data processing'
+        required: false
+        default: 'true'
+        type: boolean
 
 env:
   PYTHON_VERSION: 3.13
@@ -246,10 +251,44 @@ jobs:
         python scripts/process_dapp_data.py
         echo "✅ DApp data processing completed"
 
+  process-vaults-data:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_vaults_data == 'true')
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🏦 Process Vaults Data
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
+      run: |
+        echo "🚀 Starting vaults data processing..."
+        python scripts/process_vaults_data.py
+        echo "✅ Vaults data processing completed"
+
   notify-on-failure:
     runs-on: ubuntu-latest
     if: always() && contains(needs.*.result, 'failure')
-    needs: [process-bridge-data, process-musd-data, process-market-data, process-swaps-data, process-pools-data, process-dapp-data]
+    needs: [process-bridge-data, process-musd-data, process-market-data, process-swaps-data, process-pools-data, process-dapp-data, process-vaults-data]
     
     steps:
     - name: 📱 Discord notification on failure
@@ -273,6 +312,9 @@ jobs:
         fi
         if [[ "${{ needs.process-dapp-data.result }}" == "failure" ]]; then
           FAILED_JOBS="${FAILED_JOBS}• DApp Data Processing\n"
+        fi
+        if [[ "${{ needs.process-vaults-data.result }}" == "failure" ]]; then
+          FAILED_JOBS="${FAILED_JOBS}• Vaults Data Processing\n"
         fi
         
         curl -X POST -H "Content-Type: application/json" \
