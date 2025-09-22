@@ -328,176 +328,25 @@ def main():
     # ========================================
 
         ProgressIndicators.print_step("Aggregating bridge volume stats by token", "start")
-        # Make a copy to avoid modifying original
-        daily_brige_vol_by_token = bridge_volume.copy()
-
-        # Ensure timestamp is datetime and create date column
-        daily_brige_vol_by_token['timestamp_'] = pd.to_datetime(daily_brige_vol_by_token['timestamp_'])
-        daily_brige_vol_by_token['timestamp_'] = daily_brige_vol_by_token['timestamp_'].dt.date
-
-        # Sort by pool and timestamp for proper calculations
-        daily_brige_vol_by_token = daily_brige_vol_by_token.sort_values(['token', 'timestamp_'])
-
-        # Calculate daily volume (difference from previous day for each pool)
-        daily_brige_vol_by_token['daily_token_volume'] = daily_brige_vol_by_token.groupby('token')['volume'].diff().fillna(0)
-
-        # For first entry of each pool, use total as daily
-        first_entries = daily_brige_vol_by_token.groupby('token').first().index
-        mask = daily_brige_vol_by_token.set_index('token').index.isin(first_entries)
-        daily_brige_vol_by_token.loc[mask & daily_brige_vol_by_token['volume'].isna(), 'volume'] = \
-            daily_brige_vol_by_token.loc[mask & daily_brige_vol_by_token['volume'].isna(), 'volume']
-
-        daily_brige_vol_by_token = daily_brige_vol_by_token.groupby(['timestamp_', 'token']).agg({
-                'daily_token_volume': 'last',  # Daily volume for the token
-            }).reset_index()
-
-        # Calculate 7-day moving average for each pool
-        daily_brige_vol_by_token['volume_7d_ma'] = daily_brige_vol_by_token.groupby('token')[
-            'daily_token_volume'].transform(
-                lambda x: x.rolling(window=7, min_periods=1).mean()
-        )
-
-        # Calculate growth rate (day-over-day percentage change)
-        daily_brige_vol_by_token['growth_rate'] = daily_brige_vol_by_token.groupby('token')[
-            'daily_token_volume'].transform(
-                lambda x: x.pct_change() * 100
-        )
-
-        # Identify significant volume days (> 90th percentile for each pool)
-        daily_brige_vol_by_token['is_significant_volume'] = daily_brige_vol_by_token.groupby('token')[
-            'daily_token_volume'].transform(
-                lambda x: x > x.quantile(0.9)
-        )
-
-        # Add token rank by daily volume
-        daily_brige_vol_by_token['daily_rank'] = daily_brige_vol_by_token.groupby('timestamp_')[
-            'daily_token_volume'].rank(
-                method='dense', ascending=False
-        )
+        ## need to fill in
         ProgressIndicators.print_step(f"Generated daily volume stats for {daily_brige_vol_by_token['token'].nunique()} tokens", "success")
 
     # ========================================
     # AGGREGATE DAILY VOLUME STATS (ALL TOKENS)
     # ========================================
-        ProgressIndicators.print_step("Aggregating protocol-wide volume stats", "start")
-        daily_bridge_volume = daily_brige_vol_by_token.groupby('timestamp_').agg({
-            'daily_token_volume': 'sum',      # Total volume across all pools
-            'is_significant_volume': 'sum',       # Count of pools with significant volume
-            'token': 'count'                  # Number of active pools
-        }).reset_index()
+        ProgressIndicators.print_step("Aggregating overall daily volume data", "start")
 
-        # Rename columns for clarity
-        daily_bridge_volume.columns = [
-            'timestamp_',
-            'total_volume',
-            'tokens_with_significant_volume',
-            'tokens_count'
-        ]
+        ## need to fill in
 
-        # Calculate 7-day moving average for protocol
-        daily_bridge_volume['volume_7d_ma'] = daily_bridge_volume['total_volume'].rolling(
-            window=7, min_periods=1
-        ).mean()
-
-        # Calculate protocol-wide growth rate
-        daily_bridge_volume['growth_rate'] = daily_bridge_volume['total_volume'].pct_change()
-
-        # Identify significant volume days for protocol (> 90th percentile)
-        threshold = daily_bridge_volume['total_volume'].quantile(0.9)
-        daily_bridge_volume['is_significant_volume_day'] = daily_bridge_volume['total_volume'] > threshold
-
-        # Add some additional protocol metrics
-        daily_bridge_volume['avg_volume_per_token'] = (
-            daily_bridge_volume['total_volume'] / daily_bridge_volume['tokens_count']
-        )
-        ProgressIndicators.print_step(f"Protocol volume aggregation complete ({len(daily_bridge_volume)} days)", "success")
+        ProgressIndicators.print_step(f"Bridge volume aggregation complete", "success")
 
     # ========================================
     # AGGREGATE NET FLOW AND TVL (PER TOKEN)
     # ========================================
         ProgressIndicators.print_step("Calculating TVL and flow metrics by token", "start")
-        tvl_df = combined.copy()
-
-        daily_tvl_by_token = tvl_df.groupby(['timestamp_', 'token']).agg({
-                # TVL metrics (end of day values)
-                'tvl': 'last',
-                'net_flow': 'sum',  # Net daily flow
-                'deposit_amount_usd': 'sum',  # Total daily deposits
-                'withdrawal_amount_usd': 'sum',  # Total daily withdrawals
-                'type': 'count',  # Total transactions
-                'sender': 'nunique'  # Unique addresses
-            }).reset_index()
+        ## refactor pending
+        ProgressIndicators.print_step(f"TVL metrics calculated", "success")
             
-        # Calculate deposit and withdrawal counts
-        deposit_counts = combined[combined['type'] == 'deposit'].groupby(['timestamp_', 'token']).size()
-        withdrawal_counts = combined[combined['type'] == 'withdrawal'].groupby(['timestamp_', 'token']).size()
-            
-        # Add transaction counts to daily metrics
-        daily_tvl_by_token = daily_tvl_by_token.set_index(['timestamp_', 'token'])
-        daily_tvl_by_token['deposit_count'] = deposit_counts
-        daily_tvl_by_token['withdrawal_count'] = withdrawal_counts
-        daily_tvl_by_token = daily_tvl_by_token.fillna(0).reset_index()
-            
-        # Rename columns for clarity
-        daily_tvl_by_token.columns = [
-            'timestamp_', 'token', 'tvl', 'net_flow', 'deposits_usd', 'withdrawals_usd',
-            'total_transactions', 'unique_users', 'deposits', 'withdrawals'
-        ]
-
-        # Calculate additional metrics
-        daily_tvl_by_token['deposit_withdrawal_ratio'] = np.where(
-            daily_tvl_by_token['withdrawals_usd'] > 0,
-            daily_tvl_by_token['deposits_usd'] / daily_tvl_by_token['withdrawals_usd'],
-            np.inf
-        )
-            
-        daily_tvl_by_token['tvl_change'] = daily_tvl_by_token.groupby('token')['tvl'].diff()
-        daily_tvl_by_token['tvl_change_pct'] = daily_tvl_by_token.groupby('token')['tvl'].pct_change()
-            
-        # Calculate 7-day moving averages for key metrics
-        add_rolling_values(daily_tvl_by_token, 7, ['tvl', 'deposits_usd', 'withdrawals_usd', 'net_flow'])
-        ProgressIndicators.print_step(f"TVL metrics calculated for {daily_tvl_by_token['token'].nunique()} tokens", "success")
-            
-    # =========================================
-    # GET TOTAL DAILY TVL AND FLOW (ALL TOKENS)
-    # =========================================
-        ProgressIndicators.print_step("Calculating protocol-wide TVL and flow metrics", "start")
-        daily_tvl = daily_tvl_by_token.groupby('timestamp_').agg({
-                # TVL metrics (sum across all pools)
-                'tvl': 'sum',
-                'net_flow': 'sum',
-                'deposits_usd': 'sum',
-                'withdrawals_usd': 'sum',
-                'total_transactions': 'sum',
-                'deposits': 'sum',
-                'withdrawals': 'sum',
-                'unique_users': 'sum',  # Note: might count same user across pools
-                'token': 'count'  # Number of active pools
-            }).reset_index()
-            
-        # Calculate protocol-wide additional metrics
-        daily_tvl['protocol_deposit_withdrawal_ratio'] = np.where(
-            daily_tvl['withdrawals'] > 0,
-            daily_tvl['deposits'] / daily_tvl['withdrawals'],
-            np.inf
-        )
-            
-        daily_tvl['tvl_change'] = daily_tvl['tvl'].diff()
-        daily_tvl['tvl_change_pct'] = daily_tvl['tvl'].pct_change()
-            
-        # Calculate 7-day moving averages for protocol metrics
-        add_rolling_values(daily_tvl, 7, ['tvl', 'deposits_usd', 'withdrawals_usd', 'net_flow'])
-
-        # Identify high activity days
-        daily_tvl['high_deposit_day'] = daily_tvl['deposits'] > daily_tvl['deposits'].quantile(0.9)
-        daily_tvl['high_withdrawal_day'] = daily_tvl['withdrawals'] > daily_tvl['withdrawals'].quantile(0.9)
-
-        # Calculate average metrics per pool
-        daily_tvl['avg_tvl_per_token'] = daily_tvl['tvl'] / daily_tvl['token']
-        daily_tvl['avg_deposits_per_token'] = daily_tvl['deposits'] / daily_tvl['token']
-        daily_tvl['avg_withdrawals_per_token'] = daily_tvl['withdrawals'] / daily_tvl['token']
-
-        ProgressIndicators.print_step(f"Protocol metrics aggregation complete ({len(daily_tvl)} days)", "success")
     # ==========================================================
     # UPLOAD FINAL DATA TO BIGQUERY
     # ==========================================================
