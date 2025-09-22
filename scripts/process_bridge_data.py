@@ -193,7 +193,6 @@ def main():
     # ==========================================================
     # UPLOAD CLEAN DATA TO BIGQUERY
     # ==========================================================
-
         ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
         
         clean_datasets = [
@@ -206,7 +205,6 @@ def main():
                 bq.update_table(dataset, 'staging', table_name, id_column)
                 ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-    
     # ==================================================
     # COMBINE DEPOSIT AND WITHDRAWAL DATA
     # ==================================================
@@ -216,26 +214,17 @@ def main():
             [deposits_clean, withdrawals_clean], 
             ignore_index=True
         ).fillna(0)
+
+        # Sort by timestamp for proper cumulative calculations
+        combined = combined.sort_values('timestamp_').reset_index(drop=True)
+        
         ProgressIndicators.print_step(f"Combined {len(combined)} total bridge transactions", "success")
 
     # ==================================================
     # CREATE BRIDGE VOLUME AND BRIDGE TVL DATAFRAMES
     # ==================================================
-        ProgressIndicators.print_step("Calculating bridge volume metrics", "start")
-        # Sort by timestamp for proper cumulative calculations
-        combined = combined.sort_values('timestamp_').reset_index(drop=True)
-        combined = combined.fillna(0)
-        combined['volume'] = combined['amount_usd'].cumsum()
-
-        bridge_volume = combined[[
-            'timestamp_', 'amount', 'token', 'amount_usd',
-            'type', 'chain', 'volume', 'transactionHash_'
-        ]]
-
-        bridge_volume[['token', 'type', 'chain']] = bridge_volume[['token', 'type', 'chain']].astype(str)
-        ProgressIndicators.print_step("Bridge volume calculations complete", "success")
-
-        ProgressIndicators.print_step("Calculating net flows and TVL", "start")
+        ProgressIndicators.print_step("Calculating net flow, TVL, and volume", "start")
+        
         # Calculate net amounts (deposits positive, withdrawals negative)
         combined['net_flow'] = np.where(
             combined['type'] == 'deposit',
@@ -255,29 +244,84 @@ def main():
             0
         )
 
-        bridge_flow = combined[[
-            'timestamp_', 'amount', 'token', 'amount_usd',
-            'type', 'chain', 'net_flow', 'transactionHash_'
-        ]]
-        bridge_flow[['token', 'type', 'chain']] = bridge_flow[['token', 'type', 'chain']].astype(str)
+        combined['volume'] = combined['withdrawal_amount_usd'] + combined['deposit_amount_usd']
+        combined['tvl'] = combined['net_flow'].cumsum()
+        
+        ProgressIndicators.print_step("Calculations complete", "success")
 
-        combined['tvl'] = combined.groupby('token')['net_flow'].cumsum()
-        ProgressIndicators.print_step("TVL calculations complete", "success")
+    # ==================================================
+    # AGGREGATE TVL AND NET FLOW BY DAY
+    # ==================================================
+        ProgressIndicators.print_step("Aggregating TVL data by day", "start")
 
-    # ==========================================================
-    # UPLOAD INTERMEDIATE DATA TO BIGQUERY
-    # ==========================================================
+        tvl = combined.copy()
 
-        ProgressIndicators.print_step("Uploading intermediate data to BigQuery", "start")
-        int_datasets = [
-            (bridge_volume, 'int_bridge_volume', 'transactionHash_'),
-            (bridge_flow, 'int_bridge_flow', 'transactionHash_'),
-        ]
+        daily_tvl = tvl.groupby(['timestamp_']).agg(
+                # TVL metrics (end of day values)
+                tvl = ('tvl', 'last'),
+                net_flow = ('net_flow', 'sum'),  # Net daily flow
+                deposits_usd = ('deposit_amount_usd', 'sum'),  # Total daily deposits
+                withdrawals_usd = ('withdrawal_amount_usd', 'sum'),  # Total daily withdrawals
+                tx_type = ('type', 'count'),  # Total transactions
+            ).reset_index()
 
-        for dataset, table_name, id_column in int_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'intermediate', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+        # Calculate deposit and withdrawal counts
+        deposit_counts = tvl[tvl['type'] == 'deposit'].groupby(['timestamp_']).size()
+        depositors = tvl[tvl['type'] == 'deposit'].groupby(['timestamp_'])['depositor'].nunique()
+        withdrawal_counts = tvl[tvl['type'] == 'withdrawal'].groupby(['timestamp_']).size()
+        withdrawers = tvl[tvl['type'] == 'withdrawal'].groupby(['timestamp_'])['withdrawer'].nunique()
+            
+        # Add transaction counts to daily metrics
+        daily_tvl = daily_tvl.set_index(['timestamp_'])
+        daily_tvl['deposits'] = deposit_counts
+        daily_tvl['depositors'] = depositors
+        daily_tvl['withdrawals'] = withdrawal_counts
+        daily_tvl['withdrawers'] = withdrawers
+        daily_tvl['unique_wallets'] = daily_tvl['withdrawers'] + daily_tvl['depositors']
+        daily_tvl['total_transactions'] = daily_tvl['deposits'] + daily_tvl['withdrawals']
+        daily_tvl = daily_tvl.fillna(0).reset_index()
+
+        # Calculate protocol-wide additional metrics
+        daily_tvl['deposit_withdrawal_ratio'] = np.where(
+            daily_tvl['withdrawals'] > 0,
+            daily_tvl['deposits'] / daily_tvl['withdrawals'],
+            np.inf
+        )
+            
+        # TVL - no moving average, but track changes
+        daily_tvl['tvl_change'] = daily_tvl['tvl'].diff()
+        daily_tvl['tvl_change_pct'] = daily_tvl['tvl'].pct_change()
+        daily_tvl['tvl_ath'] = daily_tvl['tvl'].cummax()
+
+        daily_tvl['drawdown_from_ath'] = (
+            (daily_tvl['tvl'] - daily_tvl['tvl_ath']) / 
+            daily_tvl['tvl_ath']
+        )
+        for col in ['deposits', 'withdrawals', 'net_flow']:
+            daily_tvl[f'{col}_ma7'] = daily_tvl[col].rolling(window=7).mean()
+            daily_tvl[f'{col}_ma30'] = daily_tvl[col].rolling(window=7).mean()
+
+        daily_tvl = daily_tvl.fillna(0)
+
+        ProgressIndicators.print_step("Aggregation complete", "success")
+
+    # ========================================
+    # ADD VOLUME TO DAILY AGGREGATE DF
+    # ========================================
+        ProgressIndicators.print_step("Aggregating volume data by day", "start")
+
+        daily_volume = daily_tvl.copy()
+
+        daily_volume['volume'] = daily_volume['withdrawals_usd'] + daily_volume['deposits_usd']
+        daily_volume['volume_7d_ma'] = daily_volume['volume'].rolling(window=7).mean()
+        daily_volume['volume_30d_ma'] = daily_volume['volume'].rolling(window=30).mean()
+        daily_volume['volume_change'] = daily_volume['volume'].pct_change()
+        daily_volume['volume_change_7d'] = daily_volume['volume_7d_ma'].pct_change()
+        daily_volume['volume_change_30d'] = daily_volume['volume_30d_ma'].pct_change()
+        daily_volume['is_significant_volume'] = daily_volume['volume'].transform(lambda x: x > x.quantile(0.9))
+        daily_volume = daily_volume.fillna(0)
+
+        ProgressIndicators.print_step("Aggregation complete", "success")
 
     # ========================================
     # AGGREGATE BRIDGE VOLUME STATS (PER TOKEN)
