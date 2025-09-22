@@ -201,13 +201,6 @@ def main():
             'fees'
         )
         ProgressIndicators.print_step(f"Loaded {len(raw_fees_data)} raw swap transactions", "success")
-        
-
-        # Upload raw data to BigQuery
-        # ProgressIndicators.print_step("Uploading raw swap data to BigQuery", "start")
-        # if raw_swap_data is not None and len(raw_swap_data) > 0:
-        #     bq.update_table(raw_swap_data, 'raw_data', 'swaps_raw', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded raw swap data to BigQuery", "success")
 
         ################################################
         # Upload raw data to BigQuery
@@ -232,12 +225,6 @@ def main():
         swaps_df_clean = clean_swap_data(raw_swap_data)
         fees_df_clean = clean_fee_data(raw_fees_data)
 
-        # Upload cleaned swaps to BigQuery
-        # ProgressIndicators.print_step("Uploading cleaned swap data to BigQuery", "start")
-        # if swaps_df_clean is not None and len(swaps_df_clean) > 0:
-        #     bq.update_table(swaps_df_clean, 'staging', 'swaps_clean', 'transactionHash_')
-        #     ProgressIndicators.print_step("Uploaded clean swap data to BigQuery", "success")
-
         ################################################
         # Upload clean and subset dfs to BigQuery
         ################################################
@@ -258,9 +245,11 @@ def main():
 
         swaps_with_fees = pd.merge(swaps_df_clean, fees_df_clean, how='left', on='transactionHash_')
 
-        swf_int = swaps_with_fees[['timestamp__x', 'sender_x', 'to', 'contractId__x', 'pool_x', 'pool_y', 
-                                                'amount0In', 'amount0Out', 'amount1In', 'amount1Out', 'amount_usd_in', 'amount_usd_out', 
-                                                'amount0', 'amount1',  'token0', 'token1', 'amount0_usd', 'amount1_usd', 'transactionHash_']]
+        swf_int = swaps_with_fees[[
+            'timestamp__x', 'sender_x', 'to', 'contractId__x', 'pool_x', 'pool_y', 
+             'amount0In', 'amount0Out', 'amount1In', 'amount1Out', 'amount_usd_in', 'amount_usd_out', 
+             'amount0', 'amount1',  'token0', 'token1', 'amount0_usd', 'amount1_usd', 'transactionHash_'
+        ]]
 
         swf_staging = swf_int.dropna(subset=['amount0'])
 
@@ -340,6 +329,7 @@ def main():
             {
                 "Total Swaps": total_swaps,
                 "Unique Users": total_users,
+                "Total Fees": 'here',
                 "Total Volume (MUSD)": f"{total_volume_musd:,.2f}",
                 "Total Volume (USD)": f"${total_volume_usd:,.2f}",
                 "Average Swap Size": f"{avg_swap_size_musd:.2f} MUSD",
