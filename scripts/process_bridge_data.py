@@ -60,17 +60,53 @@ def add_usd_conversions(df, token_column, tokens_id_map, amount_columns=None):
     return df_with_usd
 
 @with_progress("Cleaning bridge data")
-def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col):
+def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col, txn_type):
     """Clean and format bridge transaction data."""
     if not ExceptionHandler.validate_dataframe(raw, "Raw bridge data", [sort_col]):
         raise ValueError("Invalid input data for cleaning")
     
-    df = raw.copy().sort_values(by=sort_col, ascending=False)
+    df = raw.copy().sort_values(by=sort_col)
     df = replace_token_labels(df, TOKEN_MAP)
     df = format_datetimes(df, date_cols)
     df = format_currency_columns(df, currency_cols, asset_col)
-    df['count'] = 1
+
+    df['type'] = txn_type
+
     return df
+
+@with_progress("Calculating growth rate...")
+def calculate_growth_rate(series: pd.Series, days: int):
+    """Calculate percentage growth over specified days"""
+    if len(series) < days + 1:
+        return 0
+    current = series.iloc[-1]
+    past = series.iloc[-days-1]
+    if past == 0:
+        return 0
+    return ((current - past) / past) * 100
+
+@with_progress("Calculating max drawdown...")
+def calculate_max_drawdown(series: pd.Series):
+    """Calculate maximum percentage drawdown"""
+    if len(series) == 0:
+        return 0
+    running_max = series.expanding().max()
+    drawdown = (series - running_max) / running_max * 100
+    return abs(drawdown.min())
+
+@with_progress("Calculating consecutive outflow days...")
+def calculate_consecutive_outflow_days(daily_df: pd.DataFrame):
+    """Count consecutive days of net outflows"""
+    if 'net_flow' not in daily_df.columns:
+        return 0
+    
+    consecutive = 0
+    for i in range(len(daily_df) - 1, -1, -1):
+        if daily_df['net_flow'].iloc[i] < 0:
+            consecutive += 1
+        else:
+            break
+    return consecutive
 
 # ==================================================
 # RUN MAIN PROCESS
@@ -136,29 +172,19 @@ def main():
     # LOAD + CLEAN BRIDGE DATA
     # ==================================================
         ProgressIndicators.print_step("Processing deposits data", "start")
+
         deposits = clean_bridge_data(
-            raw_deposits, 'timestamp_',
-            ['timestamp_'], ['amount'], 'token'
+            raw=raw_deposits, sort_col='timestamp_',
+            date_cols=['timestamp_'], currency_cols=['amount'], 
+            asset_col='token', txn_type='deposit'
         )
-
         deposits_with_usd = add_usd_conversions(
-            deposits,
-            token_column='token',
-            tokens_id_map=TOKENS_ID_MAP,
-            amount_columns =['amount']
+            deposits, token_column='token',
+            tokens_id_map=TOKENS_ID_MAP, amount_columns =['amount']
         )
-
-        deposits_with_usd['type'] = 'deposit'
-
-        deposits_clean = deposits_with_usd.sort_values(
-            by='timestamp_', ascending=True
-        )
-
         deposits_clean = deposits_with_usd[[
             'timestamp_', 'amount', 'token', 'amount_usd',
-            'recipient', 'transactionHash_', 'type'
-        ]]
-
+            'recipient', 'transactionHash_', 'type']]
         deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
         
         ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
@@ -166,26 +192,19 @@ def main():
         # clean withdrawals data
         ProgressIndicators.print_step("Processing withdrawals data", "start")
         withdrawals = clean_bridge_data(
-            raw_withdrawals, 'timestamp_',
-            ['timestamp_'], ['amount'], 'token'
+            raw_withdrawals, sort_col='timestamp_',
+            date_cols=['timestamp_'], currency_cols=['amount'], 
+            asset_col='token', txn_type='withdrawal'
         )
-
         withdrawals_with_usd = add_usd_conversions(
-            withdrawals,
-            token_column='token',
-            tokens_id_map=TOKENS_ID_MAP,
-            amount_columns=['amount']
+            withdrawals, token_column='token',
+            tokens_id_map=TOKENS_ID_MAP, amount_columns=['amount']
         )
-
-        withdrawals_with_usd['type'] = 'withdrawal'
-
         bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
         withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
-
         withdrawals_clean = withdrawals_with_usd[[
             'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
-            'recipient', 'sender', 'transactionHash_', 'type'
-        ]]
+            'recipient', 'sender', 'transactionHash_', 'type']]
         withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
         
         ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
@@ -211,11 +230,8 @@ def main():
         ProgressIndicators.print_step("Combining deposit and withdrawal data", "start")
         
         combined = pd.concat(
-            [deposits_clean, withdrawals_clean], 
-            ignore_index=True
+            [deposits_clean, withdrawals_clean], ignore_index=True
         ).fillna(0)
-
-        # Sort by timestamp for proper cumulative calculations
         combined = combined.sort_values('timestamp_').reset_index(drop=True)
         
         ProgressIndicators.print_step(f"Combined {len(combined)} total bridge transactions", "success")
@@ -326,43 +342,33 @@ def main():
     # ========================================
     # AGGREGATE BRIDGE VOLUME STATS (PER TOKEN)
     # ========================================
-
         ProgressIndicators.print_step("Aggregating bridge volume stats by token", "start")
-        ## need to fill in
+        # remove and refactor
         ProgressIndicators.print_step(f"Generated daily volume stats for {daily_brige_vol_by_token['token'].nunique()} tokens", "success")
-
-    # ========================================
-    # AGGREGATE DAILY VOLUME STATS (ALL TOKENS)
-    # ========================================
-        ProgressIndicators.print_step("Aggregating overall daily volume data", "start")
-
-        ## need to fill in
-
-        ProgressIndicators.print_step(f"Bridge volume aggregation complete", "success")
 
     # ========================================
     # AGGREGATE NET FLOW AND TVL (PER TOKEN)
     # ========================================
         ProgressIndicators.print_step("Calculating TVL and flow metrics by token", "start")
-        ## refactor pending
+        # remove and refactor
         ProgressIndicators.print_step(f"TVL metrics calculated", "success")
             
     # ==========================================================
     # UPLOAD FINAL DATA TO BIGQUERY
     # ==========================================================
 
-        ProgressIndicators.print_step("Uploading final data to BigQuery", "start")
-        marts_datasets = [
-            (daily_brige_vol_by_token, 'marts_daily_bridge_vol_by_token', 'timestamp_'),
-            (daily_bridge_volume, 'marts_daily_bridge_volume', 'timestamp_'),
-            (daily_tvl_by_token, 'marts_daily_bridge_tvl_by_token', 'timestamp_'),
-            (daily_tvl, 'marts_daily_tvl', 'timestamp_')
-        ]
+        # ProgressIndicators.print_step("Uploading final data to BigQuery", "start")
+        # marts_datasets = [
+        #     (daily_brige_vol_by_token, 'marts_daily_bridge_vol_by_token', 'timestamp_'),
+        #     (daily_bridge_volume, 'marts_daily_bridge_volume', 'timestamp_'),
+        #     (daily_tvl_by_token, 'marts_daily_bridge_tvl_by_token', 'timestamp_'),
+        #     (daily_tvl, 'marts_daily_tvl', 'timestamp_')
+        # ]
 
-        for dataset, table_name, id_column in marts_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+        # for dataset, table_name, id_column in marts_datasets:
+        #     if dataset is not None and len(dataset) > 0:
+        #         bq.update_table(dataset, 'marts', table_name, id_column)
+        #         ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
 
         ProgressIndicators.print_header(f"{ProgressIndicators.SUCCESS} BRIDGE DATA PROCESSING COMPLETE")
