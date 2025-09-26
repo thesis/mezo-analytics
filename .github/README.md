@@ -1,212 +1,387 @@
-# Mezo Analytics Mainnet
+# Mezo Analytics
 
-A comprehensive data processing and analytics pipeline for Mezo mainnet data, including bridge transactions, MUSD lending, and collateralization analysis.
+A comprehensive data analytics pipeline for the Mezo protocol, processing blockchain data from subgraphs, smart contracts, and block explorer APIs to generate insights and dashboards. It exports raw and transformed data to Mezo's BigQuery warehouse.
 
 ## Overview
 
-This repository provides automated data collection, processing, and analysis tools for Mezo's mainnet operations. It fetches data from multiple sources including subgraphs, APIs, and Mezo's blockchain explorer, processes it, and stores results in Supabase.
-
-## Data Sources
-
-- **Bridge Transactions**: Cross-chain bridge activity via Mezo Bridge subgraph
-- **MUSD Lending**: Loan origination, adjustments, and liquidations via MUSD subgraphs
-- **Token Prices**: Real-time pricing data from CoinGecko API
-- **MUSD Token Data**: On-chain transfer and holder data from Mezo Explorer API
+This repository contains scripts and utilities for:
+- Fetching and processing data from Mezo mainnet subgraphs
+- Querying smart contracts via Web3.py (note: these queries are performed directly in Hex)
+- Retrieving transaction data from block explorer APIs
+- Processing all major transactions on Mezo mainnet, including providing liquidity, swapping, vaulting assets, borrowing, and purchasing items in the MUSD market.
 
 ## Architecture
 
-```
-Data Sources → Processing Scripts → Supabase Database → Analytics/Visualization
-     ↓               ↓                    ↓                     ↓
-  Subgraphs     Python Pipeline      Live Tables           Notebooks
-  APIs          Visual Progress       Auto-Schema          Dashboards
-  Explorer      Error Handling       Time-Series          Reports
-```
-
-## Project Structure
+### Project Structure
 
 ```
 mezo-analytics/
-├── .github/workflows/          # GitHub Actions for automation
-│   ├── data-processing.yml     # Main cron job (every 6 hours)
-│   └── manual-data-processing.yml  # Manual trigger workflow
-├── mezo/                       # Core library modules
-│   ├── clients.py             # Database and API clients
-│   ├── currency_config.py     # Token mappings and configurations
-│   ├── currency_utils.py      # Price fetching and formatting
-│   ├── data_utils.py         # Data processing utilities
-│   ├── datetime_utils.py     # Date/time formatting
-│   ├── queries.py            # GraphQL queries
-│   └── visual_utils.py       # Progress indicators and UI
-├── scripts/                   # Main processing scripts
-│   ├── get_raw_data.py       # Data fetching functions
-│   ├── process_bridge_data.py # Bridge transaction processing
-│   ├── process_musd_data.py  # MUSD lending data processing
-│   └── archive/              # Legacy scripts
-├── tests/                    # Test and debug utilities
-├── notebooks/               # Jupyter analysis notebooks
-├── data/                   # Local data storage
-└── requirements.txt        # Python dependencies
+├── .env.example                    # Environment variables template
+├── .gitignore                      # Git ignore rules
+├── README.md                       # Project documentation
+├── requirements.txt                # Python dependencies
+├── setup.py                        # Package setup configuration
+│
+├── mezo/                          # Core library modules
+│   ├── __init__.py               # Package initialization
+│   ├── clients.py                # API clients (SubgraphClient, Web3Client, BigQueryClient)
+│   ├── queries.py                # GraphQL queries for subgraphs
+│   ├── currency_config.py        # Token mappings and currency configurations
+│   ├── currency_utils.py         # Currency conversion and formatting utilities
+│   ├── datetime_utils.py         # Date/time formatting and conversion
+│   ├── data_utils.py             # Data processing helper functions
+│   ├── visual_utils.py           # Progress indicators and error handling
+│   └── smart_contracts/          # Contract ABIs and configurations
+│       ├── ActivePool.json
+│       ├── BorrowerOperations.json
+│       ├── MezoBridge.json
+│       ├── PoolFactory.json
+│       ├── PriceFeed.json
+│       ├── Router.json
+│       ├── StabilityPool.json
+│       └── TroveManager.json
+│
+├── scripts/                       # Data processing pipelines
+│   ├── __init__.py
+│   │
+│   ├── # Main Processing Scripts
+│   ├── process_pools_data.py     # Liquidity pool metrics and TVL
+│   ├── process_musd_data.py      # MUSD loan and collateral processing
+│   ├── process_swaps_data.py     # Swap volume and fee analytics
+│   ├── process_market_data.py    # Market transactions and donations
+│   ├── process_bridge_data.py    # Bridge in/out transaction processing
+│   ├── process_vaults_data.py    # Vault deposits and withdrawals
+│   ├── process_dapp_data.py      # DApp transaction processing
+│   │
+│   ├── # Data Fetching Scripts
+│   ├── fetch_market_transactions.py  # Fetch from block explorer API
+│   ├── fetch_mezo_users.py          # User data collection
+│   ├── get_raw_data.py             # Raw subgraph data fetching
+│   │
+│   ├── # Utility Scripts
+│   ├── update_requirements.py    # Auto-update requirements.txt
+│   ├── update_all_data.py       # Orchestrate all data updates
+│   │
+│   └── archive/                  # Deprecated/archived scripts
+│       ├── get_raw_autobridge_data.py
+│       └── get_raw_loan_data.py
+│
+├── notebooks/                     # Jupyter notebooks for analysis
+│   ├── exploratory_analysis.ipynb
+│   ├── pool_metrics_analysis.ipynb
+│   └── user_behavior_analysis.ipynb
+│
+├── tests/                         # Test suite
+│   ├── __init__.py
+│   ├── test_clients.py
+│   ├── test_currency_utils.py
+│   ├── test_data_processing.py
+│   └── test_queries.py
+│
+└── docs/                          # Additional documentation
+    ├── api_reference.md
+    ├── data_dictionary.md
+    └── deployment_guide.md
 ```
 
-## Setup
+### Data Flow Architecture
 
-### Prerequisites
+### Data Flow Architecture
 
-- Python 3.13
-- Supabase account
-- CoinGecko API key
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Subgraph APIs  │     │ Smart Contracts │     │  Block Explorer │
+│   (Goldsky)     │     │   (Web3.py)     │     │      API        │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                        │
+         ▼                       ▼                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ SubgraphClient  │     │   Web3Client    │     │  API Requests   │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                        │
+         └───────────────────────┼────────────────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │   Raw Data Collection   │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │ Data Processing Scripts │
+                    │  • process_pools_data   │
+                    │  • process_musd_data    │
+                    │  • process_swaps_data   │
+                    │  • process_market_data  │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │   Data Transformation   │
+                    │  • Cleaning & Validation│
+                    │  • Currency Conversion  │
+                    │  • Metrics Calculation  │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │    BigQuery Storage     │
+                    ├─────────────────────────┤
+                    │  • raw_data/            │
+                    │  • intermediate/        │
+                    │  • marts/               │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │     Hex Dashboards      │
+                    │  • Executive KPIs       │
+                    │  • Pool Analytics       │
+                    │  • Risk Metrics         │
+                    └─────────────────────────┘
+```
 
-### Installation
+### Data Sources
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd mezo-analytics-mainnet
-   ```
+#### 1. Subgraph APIs (Goldsky)
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+All subgraphs are hosted on Goldsky and accessed via GraphQL queries:
 
-3. **Configure environment variables**:
-   Create a `.env` file with:
-   ```env
-   SUPABASE_URL_PROD=your_mezo_portal_prod_supabase_url
-   SUPABASE_KEY_PROD=your_mezo_portal_prod_supabase_key
-   SUPABASE_DATA_URL=your_data_analytics_supabase_url
-   SUPABASE_DATA_KEY=your_data_analytics_supabase_key
-   COINGECKO_KEY=your_coingecko_api_key
-   ```
+| Subgraph | URL | Purpose |
+|----------|-----|---------|
+| **Mezo Portal** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-portal-mainnet/1.0.0/gn` | Auto-bridge transactions from Mainnet |
+| **Mezo Bridge** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-bridge-mainnet/1.0.0/gn` | Bridge transactions into Mezo |
+| **Bridge Out** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/bridge-out-mezo/1.0.0/gn` | Bridge transactions out of Mezo |
+| **Borrower Operations** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/borrower-operations-mezo/1.0.0/gn` | MUSD loan operations (open/close/adjust troves) |
+| **MUSD Token** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-token/1.0.0/gn` | MUSD token transfers and mints |
+| **MUSD Market** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/market-mezo/1.0.0/gn` | MUSD market donations and purchases |
+| **Stability Pool** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-stability-pool/1.0.0/gn` | MUSD stability pool operations |
+| **Trove Manager** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn` | Trove liquidations and redemptions |
+| **MUSD Pools** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn` | MUSD liquidity pools and swaps |
+| **Tigris Pools** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn` | Tigris protocol pools |
+| **August Vaults** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn` | August protocol vaults |
+| **Wormhole** | `https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn` | Wormhole bridge operations |
+
+#### 2. Smart Contracts (Web3.py)
+
+The following contracts are queried directly using Web3.py:
+
+| Contract | Address | Methods Called |
+|----------|---------|----------------|
+| **BorrowerOperations** | `0x5fE95B9Bb60bE973cb6c90Cd07eC69b7E88fafE2` | ``borrowingRate()`, `refinancingFeePercentage()` |
+| **TroveManager** | `0x94AfB503dBca74aC3E4929BACEeDfCe19B93c193` | `liquidateTroves()`, `MUSD_GAS_COMPENSATION()`, `getCurrentICR()` |
+| **PCV** | `0x391EcC7ffEFc48cff41D0F2Bb36e38b82180B993` | `debtToPay()` | 
+
+**RPC Endpoint:** `https://mainnet.mezo.public.validationcloud.io/`
+
+#### 3. Block Explorer API
+
+**Base URL:** `https://api.explorer.mezo.org/api/v2/`
+
+**Endpoints Used:**
+- `/addresses/{address}/transactions` - Fetch transactions for specific contracts
+- `/tokens/{token_address}/transfers` - Token transfer history
+- `/tokens/{token_address}/counters` - Token holder statistics
+- `/tokens/{token_address}/` - Token metadata and market data
+
+**Contracts called via Block Explorer:**
+- MUSD token: `0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186`
+- Pools Router: `0x16A76d3cd3C1e3CE843C6680d6B37E9116b5C706`
+- TroveManager: `0x94afb503dbca74ac3e4929bacededfce19b93c193`
+- August MUSD Vault: `0x221B2D9aD7B994861Af3f4c8A80c86C4aa86Bf53`
+
+## Data Processing Pipeline
+
+### 1. Raw Data Collection
+```python
+# Subgraph queries via SubgraphClient
+SubgraphClient.fetch_subgraph_data(query, method)
+
+# Smart contract queries via Web3Client
+Web3Client.load_contract().functions.method_name().call()
+
+# Block explorer API
+requests.get(f"https://api.explorer.mezo.org/api/v2/{endpoint}")
+```
+
+### 2. Data Processing Modules
+
+#### Pool Data Processing (`process_pools_data.py`)
+- **Metrics Calculated:**
+  - TVL (Total Value Locked) with growth rates
+  - Trading volume and efficiency ratios
+  - Fee revenue analytics
+  - User engagement metrics
+  - Pool health indicators with composite scores
+  - Net flows (deposits - withdrawals)
+
+#### MUSD Data Processing (`process_musd_data.py`)
+- **Metrics Calculated:**
+  - Loan originations and closures
+  - Collateralization ratios
+  - Liquidation risk categories
+  - Borrowing fees and interest rates
+  - Stability pool deposits
+  - Redemption volumes
+
+#### Swap Data Processing (`process_swaps_data.py`)
+- **Metrics Calculated:**
+  - Swap volumes by pool
+  - Price impact analysis
+  - Trading fee revenue
+  - Token pair liquidity
+  - Slippage metrics
+
+#### Market Data Processing (`process_market_data.py`)
+- **Metrics Calculated:**
+  - Purchase volumes by product
+  - Donation amounts
+  - Transaction fees (gas costs)
+  - User participation rates
+
+### 3. Data Storage
+
+All processed data is stored in BigQuery with the following structure:
+
+```
+mezo-portal-data/
+├── raw_data/           # Raw subgraph and API data
+├── staging/            # Cleaned and normalized data
+├── intermediate/       # Transformed data
+└── marts/             # Aggregated metrics and analytics
+```
+
+## Key Classes and Methods
+
+### SubgraphClient
+```python
+class SubgraphClient:
+    def __init__(self, url, headers)
+    def fetch_subgraph_data(query, method) -> List[Dict]
+    def get_subgraph_data(subgraph_url, query, query_key) -> pd.DataFrame
+```
+
+### Web3Client
+```python
+class Web3Client:
+    def __init__(self, contract_name: str)
+    def load_abi() -> Dict
+    def load_contract() -> Contract
+```
+
+### BigQueryClient
+```python
+class BigQueryClient:
+    def __init__(self, key: str = None, project_id: str = None)
+    def create_dataset(self, dataset_id: str, location: str = "US")
+    def create_table(self, df: pd.DataFrame, dataset_id: str, table_id: str)
+    def table_exists(self, dataset_id: str, table_id: str) -> bool
+    def update_table(self, df: pd.DataFrame, dataset_id: str, table_id: str, id_column: str)
+    def upsert_table_by_id(self, df: pd.DataFrame, dataset_id: str, table_id: str, id_column: str)
+```
+
+## Environment Variables
+
+Required environment variables (in `.env` file):
+```
+# API Keys
+COINGECKO_KEY=your_coingecko_api_key
+GOOGLE_CLOUD_KEY=google_cloud_key_for_prod_warehouse
+GOOGLE_CLOUD_KEY_DEV=google_cloud_key_for_dev_warehouse
+
+# Database Connections
+SUPABASE_URL_PROD=your_supabase_url
+SUPABASE_KEY_PROD=your_supabase_key
+SUPABASE_DATA_URL=your_data_url
+SUPABASE_DATA_KEY=your_data_key
+
+# Web3 Configuration
+MEZO_RPC_URL=https://mainnet.mezo.public.validationcloud.io/
+```
+
+## Dashboard Metrics
+
+The processed data feeds into Hex dashboards with the following key metrics:
+
+### Executive Summary KPIs
+- Total Value Locked (TVL)
+- 24h Trading Volume
+- Total Users
+- Protocol Revenue
+
+### Pool Performance
+- TVL by Pool (time series)
+- Volume/TVL Efficiency Ratio
+- Fee APY by Pool
+- User Growth Trends
+
+### Risk Analytics
+- Collateralization Ratios
+- Liquidation Risk Distribution
+- Stability Pool Coverage
+- Bad Debt Tracking
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/mezo-analytics.git
+cd mezo-analytics
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials
+```
 
 ## Usage
 
-### Automated Processing
-
-The repository includes GitHub Actions workflows that run automatically:
-
-- **Every 6 hours**: Processes both bridge and MUSD data
-- **Manual trigger**: On-demand processing via GitHub Actions UI
-
-### Manual Processing
-
-Run individual scripts locally:
+### Running Data Pipelines
 
 ```bash
-# Process bridge transaction data
+# Process pool data
+python scripts/process_pools_data.py
+
+# Process MUSD loan and token
+python scripts/process_musd_data.py
+
+# Process swap data
+python scripts/process_swaps_data.py
+
+# Process bridging data (native)
 python scripts/process_bridge_data.py
 
-# Process MUSD lending data
-python scripts/process_musd_data.py
+# Process vaulting data
+python scripts/process_vaults_data
+
+# Process ecosystem dapp data
+python scripts/process_dapp_data
+
+# Process MUSD market data
+python scripts/process_market_data
 ```
 
-## Key Features
+### Scheduling Updates
 
-### **Comprehensive Data Processing**
-- **Bridge Analytics**: Daily aggregations by token with USD values
-- **MUSD Metrics**: Loan lifecycle, liquidations, and system health
-- **System Health**: Collateralization ratios and risk metrics
+Uses Github Actions to run updates periodically:
+```yml
+  schedule:
+    # Run every 6 hours (at 00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+```
 
-### **Advanced Analytics**
-- **Time Series**: Daily, rolling, and cumulative metrics
-- **Cohort Analysis**: User behavior and loan patterns
-- **Risk Assessment**: Collateralization and liquidation analysis
-- **Token Distribution**: Cross-chain asset flow tracking
+## Data Quality
 
-## Data Outputs
+### Error Handling
+- Null value checking with fallback defaults
+- Retry logic for API calls with exponential backoff
+- Data validation before uploads
+- Comprehensive logging of processing steps
 
-### Bridge Data Supabase Tables
-- `mainnet_daily_bridge_data` - Daily bridge volume by token
-- `mainnet_bridge_by_token` - Token-level bridge summaries
-- `mainnet_bridge_summary` - Overall bridge statistics
-
-### MUSD Data Supabase Tables
-- `mainnet_musd_daily` - Daily lending activity and balances
-- `mainnet_musd_borrow_summary` - Cumulative borrowing metrics
-- `mainnet_musd_system_health` - Collateralization and stability
-- `mainnet_musd_averages` - Loan size and ratio statistics
-- `mainnet_musd_token_summary` - Token holder and transfer data
-
-## Configuration
-
-### Core Library Files (`mezo/`)
-
-#### **Configuration Files**
-- **`currency_config.py`**: Token mappings and configurations
-  - `TOKEN_MAP`: Contract address → Symbol mapping
-  - `TOKEN_TYPE_MAP`: Symbol → Category (bitcoin, stablecoin, ethereum)
-  - `TOKENS_ID_MAP`: Symbol → CoinGecko ID for price fetching
-
-- **`subgraph_config.py`**: Centralized subgraph endpoint definitions
-  - Portal, Market, Bridge, Borrower Operations subgraphs
-  - MUSD Token, Stability Pool, Trove Manager endpoints
-
-#### **Data Processing Utilities**
-- **`currency_utils.py`**: Currency formatting and price fetching
-  - `format_currency_columns()`: Handles token decimal conversions (1e6, 1e8, 1e18)
-  - `get_token_prices()`: Fetches USD prices from CoinGecko API
-  - `replace_token_labels()`: Maps contract addresses to symbols
-
-- **`datetime_utils.py`**: Date and time processing
-  - `convert_unix_to_datetime()`: Unix timestamp conversion with timezone handling
-  - `format_datetimes()`: Standardizes date columns to YYYY-MM-DD format
-  - `groupby_date()`: Date-based aggregation helper
-
-- **`data_utils.py`**: Analytics and transformation utilities
-  - `add_cumulative_columns()`: Creates cumulative sum columns
-  - `add_pct_change_columns()`: Calculates percentage change metrics
-  - `add_rolling_values()`: Generates rolling window averages
-
-#### **Query Definitions**
-- **`queries.py`**: GraphQL query templates
-  - `MUSDQueries`: Loan data, liquidations, collateral snapshots
-  - `BridgeQueries`: Bridge transactions, deposits, withdrawals
-
-#### **Database Client**
-- **`clients.py`**: Database and API communication
-  - `SupabaseClient`: Dual-database architecture (production + data warehouse)
-  - `SubgraphClient`: GraphQL query execution with pagination
-  - `APIClient`: Generic HTTP client for REST APIs
-
-#### **User Interface**
-- **`visual_utils.py`**: Progress indicators and error handling
-  - `ProgressIndicators`: Visual symbols (✅❌⚠️) and progress bars
-  - `ExceptionHandler`: Retry logic and safe execution with visual feedback
-  - Decorators: `@with_progress()` and `@safe_operation()`
-
-## Development
-
-### Adding New Data Sources
-1. Create fetch functions in `scripts/get_raw_data.py`
-2. Add processing logic following existing patterns and naming conventions
-3. Update configurations in `mezo/currency_config.py`
-4. Add tests in `tests/`
-
-### Contributing
-1. Follow existing code patterns and visual indicators
-2. Add comprehensive error handling
-3. Include progress indicators for long-running operations
-4. Write tests for new functionality
-5. Update documentation
-
-## Analysis Examples
-
-The `notebooks/` directory contains analysis examples:
-- Bridge transaction flow analysis
-- MUSD lending market dynamics
-- Collateralization ratio distributions
-- Cross-chain asset migration patterns
-
----
-
-## Quick Start
-
-1. **Set up environment variables** in `.env`
-2. **Run initial processing**:
-   ```bash
-   python scripts/process_bridge_data.py
-   ```
-3. **Check Supabase** for generated tables and data
-4. **Enable GitHub Actions** for automated processing
-5. **Explore notebooks** for analysis examples
+### Data Integrity
+- Deduplication by transaction hash
+- Timestamp normalization to UTC
+- Currency formatting consistency
+- Cross-validation between data sources
