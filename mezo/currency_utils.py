@@ -189,6 +189,8 @@ def add_pool_usd_conversions(df, pool_column, pool_token_pairs, tokens_id_map):
     # Set MUSD rate to 1.0
     df_result.loc[df_result['token0'] == 'MUSD', 'token0_usd_rate'] = 1.0
     df_result.loc[df_result['token1'] == 'MUSD', 'token1_usd_rate'] = 1.0
+    df_result.loc[df_result['token0'] == 'upMUSD', 'token0_usd_rate'] = 1.0
+    df_result.loc[df_result['token1'] == 'upMUSD', 'token1_usd_rate'] = 1.0
     
     # Convert amount columns to USD
     for col_base in ['totalVolume', 'amount']:
@@ -240,6 +242,7 @@ def add_usd_conversions(df, token_column, tokens_id_map, amount_columns=None):
     
     # Set MUSD price to 1.0 (1:1 with USD)
     df_with_usd.loc[df_with_usd[token_column] == 'MUSD', 'usd'] = 1.0
+    df_with_usd.loc[df_with_usd[token_column] == 'upMUSD', 'usd'] = 1.0
     
     # Auto-detect amount columns if not provided
     if amount_columns is None:

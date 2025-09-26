@@ -1,16 +1,15 @@
-from datetime import timedelta, datetime, date
-from typing import Dict
-from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict
+from dotenv import load_dotenv
 
 from mezo.clients import SubgraphClient
 from mezo.queries import BridgeQueries
 from mezo.currency_utils import format_currency_columns, replace_token_labels
-from mezo.currency_config import TOKEN_MAP, TOKENS_ID_MAP, TOKEN_TYPE_MAP
+from mezo.currency_config import TOKEN_MAP, TOKENS_ID_MAP
 from mezo.datetime_utils import format_datetimes
 from mezo.currency_utils import get_token_prices
-from mezo.clients import BigQueryClient
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
 # ==================================================
@@ -75,8 +74,8 @@ def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col, txn_ty
 
     return df
 
-@with_progress("Calculating growth rate...")
-def calculate_growth_rate(series: pd.Series, days: int):
+
+def calculate_growth_rate(series: pd.Series, days: int) -> float:
     """Calculate percentage growth over specified days"""
     if len(series) < days + 1:
         return 0
@@ -86,8 +85,7 @@ def calculate_growth_rate(series: pd.Series, days: int):
         return 0
     return ((current - past) / past) * 100
 
-@with_progress("Calculating max drawdown...")
-def calculate_max_drawdown(series: pd.Series):
+def calculate_max_drawdown(series: pd.Series) -> float:
     """Calculate maximum percentage drawdown"""
     if len(series) == 0:
         return 0
@@ -95,8 +93,7 @@ def calculate_max_drawdown(series: pd.Series):
     drawdown = (series - running_max) / running_max * 100
     return abs(drawdown.min())
 
-@with_progress("Calculating consecutive outflow days...")
-def calculate_consecutive_outflow_days(daily_df: pd.DataFrame):
+def calculate_consecutive_outflow_days(daily_df: pd.DataFrame) -> int:
     """Count consecutive days of net outflows"""
     if 'net_flow' not in daily_df.columns:
         return 0
@@ -108,6 +105,116 @@ def calculate_consecutive_outflow_days(daily_df: pd.DataFrame):
         else:
             break
     return consecutive
+
+# ==================================================
+# GET RAW BRIDGE DATA
+# ==================================================
+
+# Load environment variables
+load_dotenv(dotenv_path='../.env', override=True)
+pd.options.display.float_format = '{:.5f}'.format
+
+raw_deposits = SubgraphClient.get_subgraph_data(
+    SubgraphClient.MEZO_BRIDGE_SUBGRAPH,
+    BridgeQueries.GET_BRIDGE_TRANSACTIONS,
+    'assetsLockeds'
+)
+
+ProgressIndicators.print_step("Fetching raw bridge withdrawal data", "start")
+raw_withdrawals = SubgraphClient.get_subgraph_data(
+    SubgraphClient.MEZO_BRIDGE_OUT_SUBGRAPH,
+    BridgeQueries.GET_NATIVE_WITHDRAWALS,
+    'assetsUnlockeds'
+)
+
+# ==================================================
+# LOAD + CLEAN BRIDGE DATA
+# ==================================================
+
+deposits = clean_bridge_data(
+    raw=raw_deposits, 
+    sort_col='timestamp_',
+    date_cols=['timestamp_'], 
+    currency_cols=['amount'], 
+    asset_col='token', 
+    txn_type='deposit'
+)
+
+deposits_with_usd = add_usd_conversions(
+    deposits,
+    token_column='token',
+    tokens_id_map=TOKENS_ID_MAP,
+    amount_columns =['amount']
+)
+
+deposits_clean = deposits_with_usd[[
+    'timestamp_', 'amount', 'token', 'amount_usd',
+    'recipient', 'transactionHash_', 'type'
+]]
+deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
+
+# clean withdrawals data
+withdrawals = clean_bridge_data(
+    raw_withdrawals, 
+    sort_col='timestamp_',
+    date_cols=['timestamp_'], 
+    currency_cols=['amount'], 
+    asset_col='token',
+    txn_type='withdrawal'
+)
+
+withdrawals_with_usd = add_usd_conversions(
+    withdrawals,
+    token_column='token',
+    tokens_id_map=TOKENS_ID_MAP,
+    amount_columns=['amount']
+)
+
+bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
+withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
+
+withdrawals_clean = withdrawals_with_usd[[
+    'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
+    'recipient', 'sender', 'transactionHash_', 'type'
+]]
+withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
+
+# ==================================================
+# COMBINE DEPOSIT AND WITHDRAWAL DATA
+# ==================================================
+
+combined = pd.concat(
+    [deposits_clean, withdrawals_clean], 
+    ignore_index=True
+).fillna(0)
+
+combined = combined.sort_values('timestamp_').reset_index(drop=True)
+
+# ==================================================
+# CREATE BRIDGE VOLUME AND BRIDGE TVL DATAFRAMES
+# ==================================================
+
+# Calculate net amounts (deposits positive, withdrawals negative)
+combined['net_flow'] = np.where(
+    combined['type'] == 'deposit',
+    combined['amount_usd'],
+    -combined['amount_usd']
+)
+# Calculate absolute amounts for deposits/withdrawals tracking
+combined['deposit_amount_usd'] = np.where(
+    combined['type'] == 'deposit',
+    combined['amount_usd'],
+    0
+)
+
+combined['withdrawal_amount_usd'] = np.where(
+    combined['type'] == 'withdrawal',
+    combined['amount_usd'],
+    0
+)
+
+combined['volume'] = combined['withdrawal_amount_usd'] + combined['deposit_amount_usd']
+combined['tvl'] = combined['net_flow'].cumsum()
 
 # ==================================================
 # CORE METRIC CALCULATIONS
@@ -125,15 +232,17 @@ def calculate_bridge_metrics(combined: pd.DataFrame):
     """
     
     # Ensure timestamp is datetime
-    combined['date'] = pd.to_datetime(combined['timestamp_'])
     combined['timestamp_'] = pd.to_datetime(combined['timestamp_'])
+    combined['date'] = combined['timestamp_']
     
     # Calculate all metrics
-    print("📊 Calculating metrics...")
+    print("📊 Calculating volume metrics...")
     
     # Time series metrics
     daily_overall = calculate_daily_metrics_overall(combined)
     daily_by_token = calculate_daily_metrics_by_token(combined)
+    weekly_overall = calculate_weekly_metrics(daily_overall)
+    monthly_overall = calculate_monthly_metrics(daily_overall)
     
     # Summary metrics
     summary_overall = calculate_summary_metrics_overall(combined, daily_overall)
@@ -149,6 +258,8 @@ def calculate_bridge_metrics(combined: pd.DataFrame):
     return {
         'daily_overall': daily_overall,
         'daily_by_token': daily_by_token,
+        'weekly_overall': weekly_overall,
+        'monthly_overall': monthly_overall,
         'summary_overall': summary_overall,
         'summary_by_token': summary_by_token,
         'user_metrics': user_metrics,
@@ -156,7 +267,10 @@ def calculate_bridge_metrics(combined: pd.DataFrame):
         'health_metrics': health_metrics
     }
 
+# ==================================================
 # TIME SERIES CALCULATIONS
+# ==================================================
+
 def calculate_daily_metrics_overall(df: pd.DataFrame):
     """
     Calculate daily aggregated metrics for all tokens combined
@@ -168,7 +282,7 @@ def calculate_daily_metrics_overall(df: pd.DataFrame):
         'transactionHash_': 'count',
         'depositor': 'nunique'
     }).rename(columns={
-        'amount_usd': 'deposit_amount_usd',
+        'amount_usd': 'deposit_volume',
         'transactionHash_': 'deposit_count',
         'depositor': 'unique_depositors'
     })
@@ -178,7 +292,7 @@ def calculate_daily_metrics_overall(df: pd.DataFrame):
         'transactionHash_': 'count',
         'withdrawer': 'nunique'
     }).rename(columns={
-        'amount_usd': 'withdrawal_amount_usd',
+        'amount_usd': 'withdrawal_volume',
         'transactionHash_': 'withdrawal_count',
         'withdrawer': 'unique_withdrawers'
     })
@@ -187,18 +301,18 @@ def calculate_daily_metrics_overall(df: pd.DataFrame):
     daily = pd.merge(deposits, withdrawals, left_index=True, right_index=True, how='outer').fillna(0)
     
     # Core flow metrics
-    daily['total_volume'] = daily['deposit_amount_usd'] + daily['withdrawal_amount_usd']
-    daily['net_flow'] = daily['deposit_amount_usd'] - daily['withdrawal_amount_usd']
-    daily['flow_ratio'] = daily['deposit_amount_usd'] / daily['withdrawal_amount_usd'].replace(0, np.nan)
+    daily['total_volume'] = daily['deposit_volume'] + daily['withdrawal_volume']
+    daily['net_flow'] = daily['deposit_volume'] - daily['withdrawal_volume']
+    daily['flow_ratio'] = daily['deposit_volume'] / daily['withdrawal_volume'].replace(0, np.nan)
     
     # Moving averages (7-day and 30-day)
-    for col in ['deposit_amount_usd', 'withdrawal_amount_usd', 'net_flow', 'total_volume']:
+    for col in ['deposit_volume', 'withdrawal_volume', 'net_flow', 'total_volume']:
         daily[f'{col}_ma7'] = daily[col].rolling(window=7, min_periods=1).mean()
         daily[f'{col}_ma30'] = daily[col].rolling(window=30, min_periods=1).mean()
     
     # Cumulative metrics
-    daily['cumulative_deposits'] = daily['deposit_amount_usd'].cumsum()
-    daily['cumulative_withdrawals'] = daily['withdrawal_amount_usd'].cumsum()
+    daily['cumulative_deposits'] = daily['deposit_volume'].cumsum()
+    daily['cumulative_withdrawals'] = daily['withdrawal_volume'].cumsum()
     daily['tvl'] = daily['net_flow'].cumsum()
     
     # TVL changes
@@ -213,11 +327,9 @@ def calculate_daily_metrics_overall(df: pd.DataFrame):
     # Volatility (rolling 7-day standard deviation of daily volumes)
     daily['volume_volatility_7d'] = daily['total_volume'].rolling(window=7, min_periods=1).std()
     
-    daily = daily.reset_index()
-
     return daily.round(2)
 
-def calculate_daily_metrics_by_token(df: pd.DataFrame):
+def calculate_daily_metrics_by_token(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate daily metrics broken down by token
     """
@@ -228,8 +340,8 @@ def calculate_daily_metrics_by_token(df: pd.DataFrame):
         'amount': 'sum',
         'transactionHash_': 'count'
     }).rename(columns={
-        'amount_usd': 'deposit_amount_usd',
-        'amount': 'deposit_amount_native',
+        'amount_usd': 'deposit_volume_usd',
+        'amount': 'deposit_amount',
         'transactionHash_': 'deposit_count'
     })
     
@@ -238,8 +350,8 @@ def calculate_daily_metrics_by_token(df: pd.DataFrame):
         'amount': 'sum',
         'transactionHash_': 'count'
     }).rename(columns={
-        'amount_usd': 'withdrawal_amount_usd',
-        'amount': 'withdrawal_amount_native',
+        'amount_usd': 'withdrawal_volume_usd',
+        'amount': 'withdrawal_amount',
         'transactionHash_': 'withdrawal_count'
     })
     
@@ -253,19 +365,69 @@ def calculate_daily_metrics_by_token(df: pd.DataFrame):
     ).fillna(0)
     
     # Calculate metrics
-    daily_by_token['net_flow'] = daily_by_token['deposit_amount_usd'] - daily_by_token['withdrawal_amount_usd']
-    daily_by_token['net_flow_native'] = daily_by_token['deposit_amount_native'] - daily_by_token['withdrawal_amount_native']
-    daily_by_token['total_volume_usd'] = daily_by_token['deposit_amount_usd'] + daily_by_token['withdrawal_amount_usd']
+    daily_by_token['net_flow_usd'] = daily_by_token['deposit_volume_usd'] - daily_by_token['withdrawal_volume_usd']
+    daily_by_token['net_flow_amount'] = daily_by_token['deposit_amount'] - daily_by_token['withdrawal_amount']
+    daily_by_token['total_volume_usd'] = daily_by_token['deposit_volume_usd'] + daily_by_token['withdrawal_volume_usd']
     
     # Calculate cumulative TVL by token
-    daily_by_token['tvl'] = daily_by_token.groupby(level='token')['net_flow'].cumsum()
-    daily_by_token['tvl_native'] = daily_by_token.groupby(level='token')['net_flow_native'].cumsum()
-    daily_by_token = daily_by_token.reset_index()
-    daily_by_token['identifier'] = daily_by_token['date'].apply(str) + '_' + daily_by_token['token']
+    daily_by_token['tvl_usd'] = daily_by_token.groupby(level='token')['net_flow_usd'].cumsum()
+    daily_by_token['tvl_amount'] = daily_by_token.groupby(level='token')['net_flow_amount'].cumsum()
     
     return daily_by_token.round(2)
 
+def calculate_weekly_metrics(daily: pd.DataFrame):
+    """
+    Aggregate daily metrics to weekly level
+    """
+    # Convert index to datetime if needed
+    weekly = daily.resample('W').agg({
+        'deposit_volume': 'sum',
+        'withdrawal_volume': 'sum',
+        'net_flow': 'sum',
+        'total_volume': 'sum',
+        'tvl': 'last',  # Take end-of-week TVL
+        'deposit_count': 'sum',
+        'withdrawal_count': 'sum',
+        'total_transactions': 'sum',
+        'unique_depositors': 'sum',
+        'unique_withdrawers': 'sum'
+    })
+    
+    # Calculate week-over-week changes
+    weekly['wow_volume_change'] = weekly['total_volume'].pct_change() * 100
+    weekly['wow_tvl_change'] = weekly['tvl'].pct_change() * 100
+    weekly['avg_daily_volume'] = weekly['total_volume'] / 7
+    
+    return weekly.round(2)
+
+def calculate_monthly_metrics(daily: pd.DataFrame):
+    """
+    Aggregate daily metrics to monthly level
+    """
+    
+    monthly = daily.resample('M').agg({
+        'deposit_volume': 'sum',
+        'withdrawal_volume': 'sum',
+        'net_flow': 'sum',
+        'total_volume': 'sum',
+        'tvl': 'last',
+        'deposit_count': 'sum',
+        'withdrawal_count': 'sum',
+        'total_transactions': 'sum',
+        'unique_depositors': 'sum',
+        'unique_withdrawers': 'sum'
+    })
+    
+    # Calculate month-over-month changes
+    monthly['mom_volume_change'] = monthly['total_volume'].pct_change() * 100
+    monthly['mom_tvl_change'] = monthly['tvl'].pct_change() * 100
+    
+    return monthly.round(2)
+
+# ==================================================
 # SUMMARY METRICS
+# ==================================================
+
 def calculate_summary_metrics_overall(df: pd.DataFrame, daily_df: pd.DataFrame):
     """
     Calculate overall summary statistics
@@ -278,7 +440,7 @@ def calculate_summary_metrics_overall(df: pd.DataFrame, daily_df: pd.DataFrame):
     last_24h = df[df['date'] == current_date]
     last_7d = df[df['date'] >= current_date - timedelta(days=7)]
     last_30d = df[df['date'] >= current_date - timedelta(days=30)]
-
+    
     summary = pd.DataFrame([{
         # Current state
         'current_tvl': daily_df['tvl'].iloc[-1],
@@ -336,10 +498,7 @@ def calculate_summary_metrics_overall(df: pd.DataFrame, daily_df: pd.DataFrame):
         
         # Other
         'days_since_launch': days_since_launch,
-        'avg_daily_volume': df['amount_usd'].sum() / days_since_launch,
-
-        # ID column for BigQuery
-        'updated_on': date.today()
+        'avg_daily_volume': df['amount_usd'].sum() / days_since_launch
     }])
     
     return summary.round(2)
@@ -362,23 +521,21 @@ def calculate_summary_metrics_by_token(df: pd.DataFrame):
         
         # Calculate token type
         token_type = TOKEN_TYPE_MAP.get(token, 'unknown')
-
+        
         summary = {
             'token': token,
             'token_type': token_type,
             
             # Volume metrics
-            'total_deposits_usd': deposits['amount_usd'].sum(),
-            'total_withdrawals_usd': withdrawals['amount_usd'].sum(),
-            'net_flow': deposits['amount_usd'].sum() - withdrawals['amount_usd'].sum(),
+            'total_deposit_volume': deposits['amount_usd'].sum(),
+            'total_withdrawal_volume': withdrawals['amount_usd'].sum(),
+            'net_volume': deposits['amount_usd'].sum() - withdrawals['amount_usd'].sum(),
             'total_volume': token_data['amount_usd'].sum(),
-            # 'tvl': df.groupby(level='token')['net_flow'].cumsum(),
-
             
             # Amount metrics (native units)
-            'total_deposits_native': deposits['amount'].sum(),
-            'total_withdrawals_native': withdrawals['amount'].sum(),
-            'net_flow_native': deposits['amount'].sum() - withdrawals['amount'].sum(),
+            'total_deposit_amount': deposits['amount'].sum(),
+            'total_withdrawal_amount': withdrawals['amount'].sum(),
+            'net_amount': deposits['amount'].sum() - withdrawals['amount'].sum(),
             
             # Transaction counts
             'deposit_count': len(deposits),
@@ -413,7 +570,10 @@ def calculate_summary_metrics_by_token(df: pd.DataFrame):
     
     return summary_df.round(2)
 
+# ==================================================
 # USER METRICS
+# ==================================================
+
 def calculate_user_metrics(df: pd.DataFrame):
     """
     Calculate user behavior metrics
@@ -448,13 +608,6 @@ def calculate_user_metrics(df: pd.DataFrame):
         labels=['Retail (<$1k)', 'Mid ($1k-10k)', 'Large ($10k-100k)', 'Whale (>$100k)']
     )
     
-    # Remove users with '0' value
-    user_metrics.drop([0,0])
-
-    # Reset index to create identifier column
-    user_metrics = user_metrics.reset_index()
-    user_metrics['user'] = user_metrics['user'].apply(str)
-    
     return user_metrics
 
 def calculate_user_metrics_by_token(df: pd.DataFrame):
@@ -488,7 +641,10 @@ def calculate_user_metrics_by_token(df: pd.DataFrame):
     
     return pd.DataFrame(user_token_metrics).round(2)
 
+# ==================================================
 # HEALTH INDICATORS
+# ==================================================
+
 def calculate_health_indicators(daily_df: pd.DataFrame, df: pd.DataFrame):
     """
     Calculate bridge health and risk indicators
@@ -502,8 +658,8 @@ def calculate_health_indicators(daily_df: pd.DataFrame, df: pd.DataFrame):
         
         # Flow health
         'consecutive_outflow_days': calculate_consecutive_outflow_days(daily_df),
-        'outflow_ratio_7d': daily_df['withdrawal_amount_usd'].iloc[-7:].sum() / 
-                            daily_df['deposit_amount_usd'].iloc[-7:].sum() if daily_df['deposit_amount_usd'].iloc[-7:].sum() > 0 else 0,
+        'outflow_ratio_7d': daily_df['withdrawal_volume'].iloc[-7:].sum() / 
+                            daily_df['deposit_volume'].iloc[-7:].sum() if daily_df['deposit_volume'].iloc[-7:].sum() > 0 else 0,
         
         # Concentration risk
         'largest_transaction': df['amount_usd'].max(),
@@ -534,8 +690,6 @@ def calculate_health_indicators(daily_df: pd.DataFrame, df: pd.DataFrame):
     
     health['risk_level'] = 'LOW' if risk_score <= 2 else 'MEDIUM' if risk_score <= 4 else 'HIGH'
     health['risk_score'] = risk_score
-
-    health['updated_on'] = date.today()
     
     return health.round(2)
 
@@ -575,8 +729,8 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     for period_name, period_data in timeframes.items():
         deposits = period_data[period_data['type'] == 'deposit']
         deposit_count = len(deposits)
-        deposit_amount_usd = deposits['amount_usd'].sum()
-        print(f"{period_name:<12} {deposit_count:>10,} ${deposit_amount_usd:>18,.0f}")
+        deposit_amount = deposits['amount_usd'].sum()
+        print(f"{period_name:<12} {deposit_count:>10,} ${deposit_amount:>18,.0f}")
     
     print("\n📤 WITHDRAWALS:")
     print("-" * 50)
@@ -586,8 +740,8 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     for period_name, period_data in timeframes.items():
         withdrawals = period_data[period_data['type'] == 'withdrawal']
         withdrawal_count = len(withdrawals)
-        withdrawal_amount_usd = withdrawals['amount_usd'].sum()
-        print(f"{period_name:<12} {withdrawal_count:>10,} ${withdrawal_amount_usd:>18,.0f}")
+        withdrawal_amount = withdrawals['amount_usd'].sum()
+        print(f"{period_name:<12} {withdrawal_count:>10,} ${withdrawal_amount:>18,.0f}")
     
     print("\n💱 NET FLOW:")
     print("-" * 50)
@@ -609,9 +763,9 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     # Top tokens
     print("\n🪙 TOP TOKENS BY VOLUME:")
     print("-" * 50)
-    top_tokens = metrics['summary_by_token'].head(5)[['token', 'total_volume', 'volume_share_pct', 'net_flow']]
+    top_tokens = metrics['summary_by_token'].head(5)[['token', 'total_volume', 'volume_share_pct', 'net_volume']]
     for _, row in top_tokens.iterrows():
-        print(f"  {row['token']:<8} ${row['total_volume']:>12,.0f} ({row['volume_share_pct']:>5.1f}%) | Net: ${row['net_flow']:>12,.0f}")
+        print(f"  {row['token']:<8} ${row['total_volume']:>12,.0f} ({row['volume_share_pct']:>5.1f}%) | Net: ${row['net_volume']:>12,.0f}")
     
     # User metrics
     print("\n👥 USER ACTIVITY:")
@@ -632,310 +786,36 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     print(f"  Outflow Ratio (7d):         {health['outflow_ratio_7d']:>6.2f}")
 
 # ==================================================
-# RUN MAIN PROCESS
+# EXPORT FUNCTIONS
 # ==================================================
 
-def main():
-    """Main function to process bridge transaction data."""
-    ProgressIndicators.print_header("BRIDGE DATA PROCESSING PIPELINE")
-
-    try:
-        # Load environment variables
-        ProgressIndicators.print_step("Loading environment variables", "start")
-        load_dotenv(dotenv_path='../.env', override=True)
-        pd.options.display.float_format = '{:.5f}'.format
-        
-        # Load clients
-        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data') 
-        # change project ID to 'mezo-data-dev' when testing
-
-        ProgressIndicators.print_step("Environment loaded successfully", "success")
-        
-    # ==================================================
-    # GET RAW BRIDGE DATA
-    # ==================================================
-        
-        ProgressIndicators.print_step("Fetching raw bridge deposit data", "start")
-        raw_deposits = SubgraphClient.get_subgraph_data(
-            SubgraphClient.MEZO_BRIDGE_SUBGRAPH,
-            BridgeQueries.GET_BRIDGE_TRANSACTIONS,
-            'assetsLockeds'
-        )
-        ProgressIndicators.print_step(f"Retrieved {len(raw_deposits) if raw_deposits is not None else 0} deposit transactions", "success")
-
-        ProgressIndicators.print_step("Fetching raw bridge withdrawal data", "start")
-        raw_withdrawals = SubgraphClient.get_subgraph_data(
-            SubgraphClient.MEZO_BRIDGE_OUT_SUBGRAPH,
-            BridgeQueries.GET_NATIVE_WITHDRAWALS,
-            'assetsUnlockeds'
-        )
-        ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
-        
-        # Upload raw data to BigQuery
-        ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
-        
-        if raw_deposits is not None and len(raw_deposits) > 0:
-            bq.update_table(raw_deposits, 'raw_data', 'bridge_transactions_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw bridge data to BigQuery", "success")
-
-    # ==========================================================
-    # UPLOAD RAW DATA TO BIGQUERY
-    # ==========================================================
-
-        ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
-        raw_datasets = [
-            (raw_deposits, 'bridge_transactions_raw', 'transactionHash_'),
-            (raw_withdrawals, 'bridge_withdrawals_raw', 'transactionHash_'),
-        ]
-
-        for dataset, table_name, id_column in raw_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'raw_data', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-    # ==================================================
-    # CLEAN BRIDGE DEPOSIT + WITHDRAWAL DATA
-    # ==================================================
-        ProgressIndicators.print_step("Processing deposits data", "start")
-        deposits = clean_bridge_data(
-            raw=raw_deposits, sort_col='timestamp_',
-            date_cols=['timestamp_'], currency_cols=['amount'], 
-            asset_col='token', txn_type='deposit'
-        )
-        deposits_with_usd = add_usd_conversions(
-            deposits, token_column='token',
-            tokens_id_map=TOKENS_ID_MAP, amount_columns =['amount']
-        )
-        deposits_clean = deposits_with_usd[[
-            'timestamp_', 'amount', 'token', 'amount_usd',
-            'recipient', 'transactionHash_', 'type']]
-        deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
-        ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
-
-        # clean withdrawals data
-        ProgressIndicators.print_step("Processing withdrawals data", "start")
-        withdrawals = clean_bridge_data(
-            raw_withdrawals, sort_col='timestamp_',
-            date_cols=['timestamp_'], currency_cols=['amount'], 
-            asset_col='token', txn_type='withdrawal'
-        )
-        withdrawals_with_usd = add_usd_conversions(
-            withdrawals, token_column='token',
-            tokens_id_map=TOKENS_ID_MAP, amount_columns=['amount']
-        )
-        bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
-        withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
-        withdrawals_clean = withdrawals_with_usd[[
-            'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
-            'recipient', 'sender', 'transactionHash_', 'type']]
-        withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
-        ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
-
-    # ==========================================================
-    # UPLOAD CLEAN DEPOSIT + WITHDRAWAL TABLES TO BIGQUERY
-    # ==========================================================
+def export_to_csv(metrics: Dict[str, pd.DataFrame], prefix: str = "bridge_metrics"):
+    """Export all metrics to CSV files"""
     
-        ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
-        clean_datasets = [
-            (deposits_clean, 'bridge_deposits_clean', 'transactionHash_'),
-            (withdrawals_clean, 'bridge_withdrawals_clean', 'transactionHash_'),
-        ]
-
-        for dataset, table_name, id_column in clean_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'staging', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-    # ==================================================
-    # ADD BRIDGE VOLUME AND BRIDGE TVL TO TABLE
-    # ==================================================
-
-        # Combine the deposit and withdrawal data tables
-        ProgressIndicators.print_step("Combining deposit and withdrawal data", "start")
-        combined = pd.concat(
-            [deposits_clean, withdrawals_clean], ignore_index=True
-        ).fillna(0)
-        combined = combined.sort_values('timestamp_').reset_index(drop=True)
-        ProgressIndicators.print_step(f"Combined {len(combined)} total bridge transactions", "success")
-
-        # Calculate net flow, tvl, volume
-        ProgressIndicators.print_step("Calculating net flow, TVL, and volume", "start")        
-        combined['net_flow'] = np.where(
-            combined['type'] == 'deposit',
-            combined['amount_usd'],
-            -combined['amount_usd']
-        )
-        combined['deposit_amount_usd'] = np.where(
-            combined['type'] == 'deposit',
-            combined['amount_usd'], 0
-        )
-        combined['withdrawal_amount_usd'] = np.where(
-            combined['type'] == 'withdrawal',
-            combined['amount_usd'], 0
-        )
-        combined['volume'] = combined['withdrawal_amount_usd'] + combined['deposit_amount_usd']
-        combined['tvl'] = combined['net_flow'].cumsum() 
-        ProgressIndicators.print_step("Calculations complete", "success")
-
-    # ==================================================
-    # AGGREGATE TVL AND NET FLOW BY DAY
-    # ==================================================
-        
-        ProgressIndicators.print_step("Aggregating TVL data by day", "start")
-        tvl = combined.copy()
-
-        daily_tvl = tvl.groupby(['timestamp_']).agg(
-                # TVL metrics (end of day values)
-                tvl = ('tvl', 'last'),
-                net_flow = ('net_flow', 'sum'),  # Net daily flow
-                deposits_usd = ('deposit_amount_usd', 'sum'),  # Total daily deposits
-                withdrawals_usd = ('withdrawal_amount_usd', 'sum'),  # Total daily withdrawals
-                tx_type = ('type', 'count'),  # Total transactions
-            ).reset_index()
-
-        # Calculate deposit and withdrawal counts
-        deposit_counts = tvl[tvl['type'] == 'deposit'].groupby(['timestamp_']).size()
-        depositors = tvl[tvl['type'] == 'deposit'].groupby(['timestamp_'])['depositor'].nunique()
-        withdrawal_counts = tvl[tvl['type'] == 'withdrawal'].groupby(['timestamp_']).size()
-        withdrawers = tvl[tvl['type'] == 'withdrawal'].groupby(['timestamp_'])['withdrawer'].nunique()
-            
-        # Add transaction counts to daily metrics
-        daily_tvl = daily_tvl.set_index(['timestamp_'])
-        daily_tvl['deposits'] = deposit_counts
-        daily_tvl['depositors'] = depositors
-        daily_tvl['withdrawals'] = withdrawal_counts
-        daily_tvl['withdrawers'] = withdrawers
-        daily_tvl['unique_wallets'] = daily_tvl['withdrawers'] + daily_tvl['depositors']
-        daily_tvl['total_transactions'] = daily_tvl['deposits'] + daily_tvl['withdrawals']
-        daily_tvl = daily_tvl.fillna(0).reset_index()
-
-        # Calculate protocol-wide additional metrics
-        daily_tvl['deposit_withdrawal_ratio'] = np.where(
-            daily_tvl['withdrawals'] > 0,
-            daily_tvl['deposits'] / daily_tvl['withdrawals'],
-            np.inf
-        )
-            
-        # TVL - no moving average, but track changes
-        daily_tvl['tvl_change'] = daily_tvl['tvl'].diff()
-        daily_tvl['tvl_change_pct'] = daily_tvl['tvl'].pct_change()
-        daily_tvl['tvl_ath'] = daily_tvl['tvl'].cummax()
-
-        daily_tvl['drawdown_from_ath'] = (
-            (daily_tvl['tvl'] - daily_tvl['tvl_ath']) / 
-            daily_tvl['tvl_ath']
-        )
-        for col in ['deposits', 'withdrawals', 'net_flow']:
-            daily_tvl[f'{col}_ma7'] = daily_tvl[col].rolling(window=7).mean()
-            daily_tvl[f'{col}_ma30'] = daily_tvl[col].rolling(window=7).mean()
-
-        daily_tvl = daily_tvl.fillna(0)
-        ProgressIndicators.print_step("Aggregation complete", "success")
-
-    # ========================================
-    # AGGREGATE VOLUME BY DAY
-    # ========================================
-        
-        ProgressIndicators.print_step("Aggregating volume data by day", "start")
-        daily_volume = daily_tvl.copy()
-        daily_volume['volume'] = daily_volume['withdrawals_usd'] + daily_volume['deposits_usd']
-        daily_volume['volume_7d_ma'] = daily_volume['volume'].rolling(window=7).mean()
-        daily_volume['volume_30d_ma'] = daily_volume['volume'].rolling(window=30).mean()
-        daily_volume['volume_change'] = daily_volume['volume'].pct_change()
-        daily_volume['volume_change_7d'] = daily_volume['volume_7d_ma'].pct_change()
-        daily_volume['volume_change_30d'] = daily_volume['volume_30d_ma'].pct_change()
-        daily_volume['is_significant_volume'] = daily_volume['volume'].transform(lambda x: x > x.quantile(0.9))
-        daily_volume = daily_volume.fillna(0)
-        ProgressIndicators.print_step("Aggregation complete", "success")
-
-    # ========================================
-    # AGGREGATE VOLUME BY DAY
-    # ========================================
-
-        ProgressIndicators.print_step("Uploading daily data to BigQuery", "start")
-        daily_datasets = [
-            (daily_tvl, 'agg_bridge_daily-tvl', 'timestamp_'),
-            (daily_volume, 'agg_bridge_daily-volume', 'timestamp_'),
-        ]
-
-        for dataset, table_name, id_column in daily_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-    # ========================================
-    # RUN COMPREHENSIVE BRIDGE METRICS
-    # ========================================
-
-        ProgressIndicators.print_step("Create comprehensive bridge metrics dataframes...", "start")
-        metrics = calculate_bridge_metrics(combined)
-        ProgressIndicators.print_step(f"Generated comprehensive metrics tables.", "success")
-
-        # Access intermediate dataframes
-        user_metrics = metrics['user_metrics']
-        daily_by_token = metrics['daily_by_token']
-
-        # Access clean/final dataframes
-        daily_overall = metrics['daily_overall']
-        summary_overall = metrics['summary_overall']
-        summary_by_token = metrics['summary_by_token']
-        health_metrics = metrics['health_metrics']
-        user_metrics_by_token = metrics['user_metrics_by_token']
-
-    # ==========================================================
-    # UPLOAD AGGREGATED DATA TO BIGQUERY
-    # ==========================================================
-        
-        # INTERMEDIATE TABLES
-        ProgressIndicators.print_step("Uploading intermediate tables to BigQuery", "start")
-        int_datasets = [
-            (user_metrics, 'int_bridge_user-metrics', 'user'),
-            (daily_by_token, 'int_bridge_daily-by-token', 'identifier')
-        ]
-
-        for dataset, table_name, id_column in int_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'intermediate', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-        # MARTS TABLES
-        ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
-        marts_datasets = [
-            (daily_overall, 'marts_bridge_daily-overall', 'date'),
-            (user_metrics_by_token, 'marts_bridge_user-metrics-by-token', 'token'),
-            (summary_by_token, 'marts_bridge_summary-by-token', 'token')
-        ]
-
-        for dataset, table_name, id_column in marts_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-        
-        ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
-        upsert_datasets = [
-            (summary_overall, 'marts_bridge_summary', 'updated_on'),
-            (health_metrics, 'marts_bridge_health-metrics', 'updated_on')
-        ]
-
-        for dataset, table_name, id_column in upsert_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-        # Display summary
-        display_summary(metrics, combined)
-        
-        ProgressIndicators.print_header(f"{ProgressIndicators.SUCCESS} BRIDGE DATA PROCESSING COMPLETE")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    except Exception as e:
-        ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
-        ProgressIndicators.print_header(f"{ProgressIndicators.ERROR} PROCESSING FAILED")
-        print(f"\n{ProgressIndicators.INFO} Error traceback:")
-        print(f"{'─' * 50}")
-        import traceback
-        traceback.print_exc()
-        print(f"{'─' * 50}")
-        raise
+    for name, df in metrics.items():
+        filename = f"{prefix}_{name}_{timestamp}.csv"
+        df.to_csv(filename)
+        print(f"✅ Exported {name} to {filename}")
 
-if __name__ == "__main__":
-    results = main()
+# ==================================================
+# MAIN EXECUTION
+# ==================================================
+
+from mezo.currency_config import TOKEN_TYPE_MAP
+    
+# Calculate all metrics
+metrics = calculate_bridge_metrics(combined)
+
+# Access specific dataframes
+daily_overall = metrics['daily_overall']
+token_summary = metrics['summary_by_token']
+health = metrics['health_metrics']
+
+# Display summary
+display_summary(metrics, combined)
+
+export_to_csv(metrics)
+
+datetime.now()

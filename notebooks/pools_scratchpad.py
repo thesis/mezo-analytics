@@ -133,7 +133,7 @@ volume_by_pool = volume_final.groupby(['pool_name']).agg(
 ####################################################################################
 
 pool_deposits = SubgraphClient(
-    url = SubgraphClient.POOLS_SUBGRAPH,
+    url = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn',
     headers = SubgraphClient.SUBGRAPH_HEADERS
 )
 
@@ -141,6 +141,7 @@ pool_deposits = SubgraphClient(
 pool_deposit_data =  pool_deposits.fetch_subgraph_data(PoolQueries.GET_DEPOSITS, 'mints')
 
 raw = pd.DataFrame(pool_deposit_data)
+raw['contractId_'].unique()
 
 def clean_deposits_data(df):
     ddf = df.copy()

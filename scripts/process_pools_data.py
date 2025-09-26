@@ -22,11 +22,6 @@ def process_pools_data(raw, transaction_type):
     df = add_pool_usd_conversions(df, 'contractId_', POOL_TOKEN_PAIRS, TOKENS_ID_MAP)
     df['transaction_type'] = transaction_type
 
-    # df = df.drop(columns=['token0_index', 'token1_index', 'token0_usd_rate', 'token1_usd_rate'])
-
-    # df = df[['timestamp_', 'pool', 'amount0', 'token0', 'amount0_usd', 'amount1', 'token1', 'amount1_usd', 
-    #         'transaction_type', 'sender', 'contractId_', 'transactionHash_']]
-    
     return df
 
 @with_progress("Calculating TVL and daily aggregates")
@@ -98,6 +93,7 @@ def agg_pools_data(deposits_df, withdrawals_df):
         'token0': 'first',
         'token1': 'first'
     }).to_dict('index')
+
     # =========================================
     # PART 1: DAILY METRICS BY POOL
     # =========================================
@@ -269,7 +265,9 @@ def process_volume_data(raw_volume):
     for col in token_columns:
         df[col] = df[col].replace({
             'mUSDC': 'USDC',
-            'mUSDT': 'USDT'
+            'mUSDT': 'USDT',
+            'mSolvBTC': 'SolvBTC',
+            'mxSolvBTC': 'xSolvBTC'
         })
     
     # Map pool names
