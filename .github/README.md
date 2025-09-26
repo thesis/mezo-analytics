@@ -168,7 +168,7 @@ The following contracts are queried directly using Web3.py:
 
 | Contract | Address | Methods Called |
 |----------|---------|----------------|
-| **BorrowerOperations** | `0x5fE95B9Bb60bE973cb6c90Cd07eC69b7E88fafE2` | ``borrowingRate()`, `refinancingFeePercentage()` |
+| **BorrowerOperations** | `0x5fE95B9Bb60bE973cb6c90Cd07eC69b7E88fafE2` | `borrowingRate()`, `refinancingFeePercentage()` |
 | **TroveManager** | `0x94AfB503dBca74aC3E4929BACEeDfCe19B93c193` | `liquidateTroves()`, `MUSD_GAS_COMPENSATION()`, `getCurrentICR()` |
 | **PCV** | `0x391EcC7ffEFc48cff41D0F2Bb36e38b82180B993` | `debtToPay()` | 
 
