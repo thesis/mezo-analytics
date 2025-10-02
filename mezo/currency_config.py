@@ -81,7 +81,7 @@ POOL_TOKEN_PAIRS = {
     '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': {'token0': 'USDC', 'token1': 'MUSD'},
     '0x10906a9e9215939561597b4c8e4b98f93c02031a': {'token0': 'MUSD', 'token1': 'USDT'},
     '0x329d64572f8922c3fe90d23a3c74a360d8ea6235': {'token0': 'BTC', 'token1': 'xSolvBTC'},
-    '0x2a1ab0224a7a608d3a992cb15594a2934f74f4c0': {'token0': 'USDC', 'token1': 'mUSDT'},
+    '0x2a1ab0224a7a608d3a992cb15594a2934f74f4c0': {'token0': 'USDC', 'token1': 'USDT'},
     '0x58c8f6d2e589928c46425eaf4254b6a41c45a584': {'token0': 'upMUSD', 'token1': 'MUSD'},
     '0x5cd2a025c001e07ae354a4c22c3009908de1ac59': {'token0': 'SolvBTC', 'token1': 'MUSD'},
     '0x9e60cd4d5b718178fab0137200a36a5472191302': {'token0': 'BTC', 'token1': 'USDT'},
@@ -117,6 +117,12 @@ TIGRIS_MAP = {
 
 }
 
+MEZO_ASSET_NAMES_MAP = {
+    'mUSDC': 'USDC', 
+    'mUSDT': 'USDT',
+    'mxSolvBTC': 'xSolvBTC',
+    'mSolvBTC': 'SolvBTC'
+}
 MUSD_MARKET_MAP = {
     '0x28D351135955bc98f6C62535e6816399134e6506' : 'Brink',
     '0x77DCB767ae72d6aff6B8C20c2a76C6f66A5Cb46c' : 'SheFi',

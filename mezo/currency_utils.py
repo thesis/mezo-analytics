@@ -186,7 +186,7 @@ def add_pool_usd_conversions(df, pool_column, pool_token_pairs, tokens_id_map):
     token1_prices = token_usd_prices.rename(columns={'index': 'token1_index', 'usd': 'token1_usd_rate'})
     df_result = pd.merge(df_result, token1_prices[['token1_index', 'token1_usd_rate']], on='token1_index', how='left')
     
-    # Set MUSD rate to 1.0
+    # set MUSD and upMUSD rate to 1.0
     df_result.loc[df_result['token0'] == 'MUSD', 'token0_usd_rate'] = 1.0
     df_result.loc[df_result['token1'] == 'MUSD', 'token1_usd_rate'] = 1.0
     df_result.loc[df_result['token0'] == 'upMUSD', 'token0_usd_rate'] = 1.0
