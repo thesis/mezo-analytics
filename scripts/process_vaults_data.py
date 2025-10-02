@@ -1,13 +1,16 @@
 import pandas as pd
-import numpy as np
 from dotenv import load_dotenv
 import os
 from mezo.currency_utils import format_musd_currency_columns
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_cumulative_columns, add_rolling_values
-from mezo.clients import BigQueryClient, SubgraphClient, Web3Client
+from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import VaultQueries
 from mezo.visual_utils import ProgressIndicators
+
+# ========================================
+# helper functions
+# ========================================
 
 def process_vaults_data(df):
     vaults_df = df.copy()
@@ -50,47 +53,85 @@ def aggregate_cumulative_daily_vaults(df_daily):
 
     return cumul_daily_vault_txns
 
-def main():
-    # Initialize environment
+# ========================================
+# main process
+# ========================================
+
+def main(test_mode=False, sample_size=False, skip_bigquery=False):
+
+    if test_mode:
+        print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
+        if sample_size:
+            print(f"{'Using sample size: ' + str(sample_size):^60}")
+        if skip_bigquery:
+            print(f"{'Skipping BigQuery uploads':^60}")
+        print(f"{'─' * 60}\n")
+
+    # ========================================
+    # initialize env and client
+    # ========================================
+
     load_dotenv(dotenv_path='../.env', override=True)
     COINGECKO_KEY = os.getenv('COINGECKO_KEY')
 
-    # Initialize BigQuery client
-    bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+    if not skip_bigquery:
+        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
 
-    # Get vaults data from august vault subgraph
-    vaults = SubgraphClient.get_subgraph_data(SubgraphClient.AUGUST_VAULT_SUBGRAPH, VaultQueries.GET_VAULT_TRANSFERS, 'transfers')
+    # ========================================
+    # fetch raw data from august vaults subgraph
+    # ========================================
 
-    # Clean raw vaults data
+    if not test_mode:
+        vaults = SubgraphClient.get_subgraph_data(SubgraphClient.AUGUST_VAULT_SUBGRAPH, VaultQueries.GET_VAULT_TRANSFERS, 'transfers')
+
+        vaults.to_csv('raw_vaults_data.csv')
+    else:
+        vaults = pd.read_csv('raw_vaults_data.csv')        
+
+    # ========================================
+    # clean and process raw vaults data
+    # ========================================
+    
     vaults_df = process_vaults_data(vaults)
 
-    # Aggregate vaults data by day
     daily_vault_txns = aggregate_vaults_by_day(vaults_df)
     cumul_daily_vault_txns = aggregate_cumulative_daily_vaults(daily_vault_txns)
 
-    # Upload raw vaults data to BigQuery
-    ProgressIndicators.print_step("Uploading raw vaults data to BigQuery", "start")
-    if vaults is not None and len(vaults) > 0:
-        bq.update_table(vaults, 'raw_data', 'vaults_raw', 'transactionHash_')
-        ProgressIndicators.print_step("Uploaded raw vaults to BigQuery", "success")
+    # ========================================
+    # upload vaults data to BigQuery
+    # ========================================
 
-    # Upload clean vaults data to BigQuery
-    ProgressIndicators.print_step("Uploading clean vaults data to BigQuery", "start")
-    if vaults_df is not None and len(vaults_df) > 0:
-        bq.update_table(vaults_df, 'staging', 'vaults_clean', 'transactionHash_')
-        ProgressIndicators.print_step("Uploaded clean vaults data to BigQuery", "success")
+    if not skip_bigquery:
 
-    # Upload aggregate vaults data to BigQuery
-    ProgressIndicators.print_step("Uploading aggregate data to BigQuery", "start")
-    datasets_to_upload = [
-        (daily_vault_txns, 'agg_daily_vaults', 'timestamp_'),
-        (cumul_daily_vault_txns, 'agg_cumulative_daily_vaults', 'timestamp_')
-    ]
+        # upload raw vaults data
+        ProgressIndicators.print_step("Uploading raw vaults data to BigQuery", "start")
+        if vaults is not None and len(vaults) > 0:
+            bq.update_table(vaults, 'raw_data', 'vaults_raw', 'transactionHash_')
+            ProgressIndicators.print_step("Uploaded raw vaults to BigQuery", "success")
 
-    for dataset, table_name, id_column in datasets_to_upload:
-        if dataset is not None and len(dataset) > 0:
-            bq.update_table(dataset, 'marts', table_name, id_column)
-            ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+        # upload clean vaults data
+        ProgressIndicators.print_step("Uploading clean vaults data to BigQuery", "start")
+        if vaults_df is not None and len(vaults_df) > 0:
+            bq.update_table(vaults_df, 'staging', 'vaults_clean', 'transactionHash_')
+            ProgressIndicators.print_step("Uploaded clean vaults data to BigQuery", "success")
+
+        # upload aggregate vaults data
+        ProgressIndicators.print_step("Uploading aggregate data to BigQuery", "start")
+        datasets_to_upload = [
+            (daily_vault_txns, 'agg_daily_vaults', 'timestamp_'),
+            (cumul_daily_vault_txns, 'agg_cumulative_daily_vaults', 'timestamp_')
+        ]
+
+        for dataset, table_name, id_column in datasets_to_upload:
+            if dataset is not None and len(dataset) > 0:
+                bq.update_table(dataset, 'marts', table_name, id_column)
+                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+
 
 if __name__ == "__main__":
     results = main()
+
+# for testing, uncomment one of these:
+    # results = quick_test(sample_size=500)
+    # inspect_data(results)
+    # save_test_outputs(results)
