@@ -1,19 +1,67 @@
+"""
+Process liquidity pool data from Mezo pools.
+
+This script:
+1. Fetches deposit/withdrawal data from pools subgraph
+2. Fetches volume and fee data from Tigris subgraph  
+3. Calculates TVL, volume metrics, and efficiency indicators
+4. Creates daily aggregations and pool-level summaries
+5. Uploads to BigQuery (raw, staging, and marts layers)
+"""
+
 from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
+import os
+from datetime import datetime, timedelta
+from typing import Dict, Tuple
+
 from mezo.currency_utils import format_pool_token_columns, add_pool_usd_conversions, format_token_columns, add_usd_conversions
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, flatten_json_column
 from mezo.clients import BigQueryClient, SubgraphClient
-from mezo.currency_config import POOLS_MAP, POOL_TOKEN_PAIRS, TOKENS_ID_MAP, TIGRIS_MAP
+from mezo.currency_config import POOLS_MAP, POOL_TOKEN_PAIRS, TOKENS_ID_MAP, TIGRIS_MAP, MEZO_ASSET_NAMES_MAP
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 from mezo.queries import PoolQueries
 
-@with_progress("Processing pool data")
+# ==================================================
+# HELPER FUNCTIONS
+# ==================================================
+
+@with_progress("Calculating the volume for each row")
+def get_volume_for_row(row):
+    """Determine which volume to use based on token types."""
+    volatiles = ['SolvBTC', 'xSolvBTC']
+    stables = ['USDC', 'USDT', 'upMUSD']
+    
+    token0 = row['pool_token0_symbol']
+    token1 = row['pool_token1_symbol']
+    vol0 = row['totalVolume0_usd']
+    vol1 = row['totalVolume1_usd']
+    
+    # priority 1: MUSD
+    if token0 == 'MUSD':
+        return vol0
+    elif token1 == 'MUSD':
+        return vol1
+    # priority 2: other stables
+    elif token0 in stables and token1 not in stables:
+        return vol0
+    elif token1 in stables and token0 not in stables:
+        return vol1
+    # priority 3: take BTC if pair is another volatile asset
+    elif token0 == 'BTC' and token1 in volatiles:
+        return vol0
+    elif token1 == 'BTC' and token0 in volatiles:
+        return vol1
+    else:
+        return max(vol0, vol1)
+            
+@with_progress("Processing pool deposit/withdrawal data")
 def process_pools_data(raw, transaction_type):
     """Process raw data from musd-pools subgraphs"""
-    if not ExceptionHandler.validate_dataframe(raw, "Raw data", ['contractId_', 'timestamp_']):
-        raise ValueError("Invalid data structure")
+    if not ExceptionHandler.validate_dataframe(raw, f"Raw {transaction_type} data", ['contractId_', 'timestamp_']):
+        raise ValueError(f"Invalid {transaction_type} data structure")
     
     df = raw.copy()
     df['pool'] = df['contractId_'].map(POOLS_MAP)
@@ -24,35 +72,167 @@ def process_pools_data(raw, transaction_type):
 
     return df
 
-@with_progress("Calculating TVL and daily aggregates")
-def agg_pools_data(deposits_df, withdrawals_df):
-    """
-    Create comprehensive daily metrics for liquidity pools including deposits, 
-    withdrawals, transactions, and TVL for both individual pools and protocol-wide.
+@with_progress("Processing pool volume data")
+def process_volume_data(raw_volume):
+    """Process raw volume data from Tigris pools"""
+    if not ExceptionHandler.validate_dataframe(raw_volume, "Raw volume data", ['timestamp']):
+        raise ValueError("Invalid volume data structure")
     
-    Parameters:
-    -----------
-    deposits_df : pandas.DataFrame
-        DataFrame with deposit transactions
-    withdrawals_df : pandas.DataFrame
-        DataFrame with withdrawal transactions
+    df = raw_volume.copy()
+    
+    # Flatten JSON pool column
+    df = flatten_json_column(df, 'pool')
+    
+    # Format timestamps
+    df = format_datetimes(df, ['timestamp'])
+    
+    # Replace token symbols
+    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
+    for col in token_columns:
+        df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
+    
+    # Map pool names
+    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
+
+    # Format token columns
+    df = format_token_columns(df, ['totalVolume0'], 'pool_token0_symbol')
+    df = format_token_columns(df, ['totalVolume1'], 'pool_token1_symbol')
+    
+    # Add USD conversions
+    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalVolume0'])
+    df = df.drop(columns=['index', 'usd'])
+    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalVolume1'])
+    df = df.drop(columns=['index', 'usd'])
+    
+    return df
+
+@with_progress("Processing pool fees data")
+def process_fees_data(raw_fees):
+    """Process raw fees data from Tigris pools"""
+    if not ExceptionHandler.validate_dataframe(raw_fees, "Raw fees data", ['timestamp']):
+        raise ValueError("Invalid fees data structure")
+    
+    df = raw_fees.copy()
+    
+    # Flatten JSON pool column
+    df = flatten_json_column(df, 'pool')
+
+    # Format timestamps
+    df = format_datetimes(df, ['timestamp'])
+    
+    # Replace token symbols
+    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
+    for col in token_columns:
+        df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
+
+    # Map pool names
+    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
+    
+    # Format token columns
+    df = format_token_columns(df, ['totalFees0'], 'pool_token0_symbol')
+    df = format_token_columns(df, ['totalFees1'], 'pool_token1_symbol')
+    
+    # Add USD conversions
+    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalFees0'])
+    df = df.drop(columns=['index', 'usd'])
+    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalFees1'])
+    df = df.drop(columns=['index', 'usd', 'pool_token0_symbol', 'pool_token1_symbol'])
+
+    df = df[[
+        'timestamp', 'pool_name', 'pool', 'totalFees0', 'totalFees1', 
+        'totalFees0_usd', 'totalFees1_usd', 'id'
+    ]]
+    
+    return df
+
+@with_progress("Generating report")
+def save_metrics_snapshot(metrics_data: dict, script_name: str = 'pools'):
+    """
+    Save processing metrics to a JSON file for later report generation.
+    
+    Args:
+        metrics_data: Dictionary containing all metrics from the processing
+        script_name: Name of the script (used in filename)
+    """
+    import json
+    from datetime import datetime, date
+    import numpy as np
+    
+    # Create metrics directory if it doesn't exist
+    metrics_dir = 'metrics_snapshots'
+    os.makedirs(metrics_dir, exist_ok=True)
+    
+    # Convert DataFrames to dictionaries and handle data types
+    serializable_metrics = {}
+    
+    for key, value in metrics_data.items():
+        if isinstance(value, pd.DataFrame):
+            # Convert DataFrame to dict and handle special types
+            df_dict = value.to_dict('records')
+            # Convert any datetime/date objects to strings
+            for record in df_dict:
+                for k, v in record.items():
+                    if isinstance(v, (datetime, date)):
+                        record[k] = v.isoformat()
+                    elif isinstance(v, (np.integer, np.floating)):
+                        record[k] = float(v)
+                    elif isinstance(v, np.ndarray):
+                        record[k] = v.tolist()
+                    elif pd.isna(v):
+                        record[k] = None
+            serializable_metrics[key] = df_dict
+        elif isinstance(value, (np.integer, np.floating)):
+            serializable_metrics[key] = float(value)
+        elif isinstance(value, np.ndarray):
+            serializable_metrics[key] = value.tolist()
+        else:
+            serializable_metrics[key] = value
+    
+    # Add metadata
+    metadata = {
+        'generated_at': datetime.now().isoformat(),
+        'script': script_name,
+        'version': '1.0.0'
+    }
+    
+    output = {
+        'metadata': metadata,
+        'metrics': serializable_metrics
+    }
+    
+    # Save with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{metrics_dir}/{script_name}_metrics_{timestamp}.json"
+    
+    with open(filename, 'w') as f:
+        json.dump(output, f, indent=2, default=str)
+    
+    # Also save as 'latest' for easy access
+    latest_filename = f"{metrics_dir}/{script_name}_metrics_latest.json"
+    with open(latest_filename, 'w') as f:
+        json.dump(output, f, indent=2, default=str)
+    
+    print(f"\n📁 Metrics saved to:")
+    print(f"   - {filename}")
+    print(f"   - {latest_filename}")
+    
+    return filename
+
+# ==================================================
+# TVL AND LIQUIDITY CALCULATIONS
+# ==================================================
+
+@with_progress("Calculating TVL and daily pool metrics")
+def calculate_tvl_and_daily_metrics(deposits_df, withdrawals_df):
+    """
+    Calculate TVL and comprehensive daily metrics for liquidity pools.
     
     Returns:
-    --------
-    tuple: (daily_pool_metrics, daily_protocol_metrics, tvl_snapshot)
-        - daily_pool_metrics: Daily metrics for each pool
-        - daily_protocol_metrics: Daily metrics for all pools combined
-        - tvl_snapshot: Current TVL snapshot for each pool
+        tuple: (daily_pool_metrics, daily_pool_metrics_all, tvl_snapshot)
     """
     
-    # Ensure we're working with copies
-    deposits = deposits_df.copy()
-    withdrawals = withdrawals_df.copy()
-    
     # Combine deposits and withdrawals
-    combined = pd.concat([deposits, withdrawals], ignore_index=True)
-        
-    # Sort by timestamp for proper cumulative calculations
+    combined = pd.concat([deposits_df, withdrawals_df], ignore_index=True)
     combined = combined.sort_values('timestamp_').reset_index(drop=True)
 
     # Calculate net amounts (deposits positive, withdrawals negative)
@@ -70,13 +250,13 @@ def agg_pools_data(deposits_df, withdrawals_df):
 
     combined['net_total_usd'] = combined['net_amount0_usd'] + combined['net_amount1_usd']
 
-    # Calculate absolute amounts for deposits/withdrawals tracking
+    # Calculate absolute amounts for tracking
     combined['deposit_amount_usd'] = np.where(
         combined['transaction_type'] == 'deposit',
         combined['amount0_usd'] + combined['amount1_usd'],
         0
     )
-    
+
     combined['withdrawal_amount_usd'] = np.where(
         combined['transaction_type'] == 'withdrawal',
         combined['amount0_usd'] + combined['amount1_usd'],
@@ -93,9 +273,9 @@ def agg_pools_data(deposits_df, withdrawals_df):
         'token0': 'first',
         'token1': 'first'
     }).to_dict('index')
-
+    
     # =========================================
-    # PART 1: DAILY METRICS BY POOL
+    # DAILY METRICS BY POOL
     # =========================================
     
     daily_pool_metrics = combined.groupby(['timestamp_', 'pool']).agg({
@@ -105,19 +285,15 @@ def agg_pools_data(deposits_df, withdrawals_df):
         'tvl_token1_usd': 'last',
         
         # Flow metrics
-        'net_total_usd': 'sum',  # Net daily flow
-        
-        # Deposit metrics
-        'deposit_amount_usd': 'sum',  # Total daily deposits
-        
-        # Withdrawal metrics  
-        'withdrawal_amount_usd': 'sum',  # Total daily withdrawals
+        'net_total_usd': 'sum',
+        'deposit_amount_usd': 'sum',
+        'withdrawal_amount_usd': 'sum',
         
         # Transaction counts
-        'transaction_type': 'count',  # Total transactions
+        'transaction_type': 'count',
         
         # Unique users
-        'sender': 'nunique'  # Unique addresses
+        'sender': 'nunique'
     }).reset_index()
     
     # Calculate deposit and withdrawal counts
@@ -132,7 +308,7 @@ def agg_pools_data(deposits_df, withdrawals_df):
     
     # Rename columns for clarity
     daily_pool_metrics.columns = [
-        'timestamp_', 'pool',
+        'date', 'pool',
         'tvl_total_usd', 'tvl_token0_usd', 'tvl_token1_usd',
         'daily_net_flow', 'daily_deposits_usd', 'daily_withdrawals_usd',
         'total_transactions', 'unique_users',
@@ -153,17 +329,17 @@ def agg_pools_data(deposits_df, withdrawals_df):
     daily_pool_metrics['tvl_change'] = daily_pool_metrics.groupby('pool')['tvl_total_usd'].diff()
     daily_pool_metrics['tvl_change_pct'] = daily_pool_metrics.groupby('pool')['tvl_total_usd'].pct_change() * 100
     
-    # Calculate 7-day moving averages for key metrics
+    # Add 7-day moving averages
     for metric in ['tvl_total_usd', 'daily_deposits_usd', 'daily_withdrawals_usd', 'daily_net_flow']:
-        daily_pool_metrics[f'{metric}_7d_ma'] = daily_pool_metrics.groupby('pool')[metric].transform(
+        daily_pool_metrics[f'{metric}_ma7'] = daily_pool_metrics.groupby('pool')[metric].transform(
             lambda x: x.rolling(window=7, min_periods=1).mean()
         )
     
     # =========================================
-    # PART 2: DAILY METRICS FOR ALL POOLS COMBINED
+    # DAILY METRICS FOR ALL POOLS COMBINED  
     # =========================================
     
-    daily_protocol_metrics = daily_pool_metrics.groupby('timestamp_').agg({
+    daily_pool_metrics_all = daily_pool_metrics.groupby('date').agg({
         # TVL metrics (sum across all pools)
         'tvl_total_usd': 'sum',
         'tvl_token0_usd': 'sum',
@@ -180,15 +356,15 @@ def agg_pools_data(deposits_df, withdrawals_df):
         'withdrawal_transactions': 'sum',
         
         # User metrics
-        'unique_users': 'sum',  # Note: might count same user across pools
+        'unique_users': 'sum',
         
         # Pool activity
-        'pool': 'count'  # Number of active pools
+        'pool': 'count'
     }).reset_index()
     
     # Rename columns for clarity
-    daily_protocol_metrics.columns = [
-        'timestamp_',
+    daily_pool_metrics_all.columns = [
+        'date',
         'protocol_tvl_total', 'protocol_tvl_token0', 'protocol_tvl_token1',
         'protocol_daily_net_flow', 'protocol_daily_deposits', 'protocol_daily_withdrawals',
         'protocol_total_transactions', 'protocol_deposit_transactions', 'protocol_withdrawal_transactions',
@@ -196,30 +372,21 @@ def agg_pools_data(deposits_df, withdrawals_df):
     ]
     
     # Calculate protocol-wide additional metrics
-    daily_protocol_metrics['protocol_deposit_withdrawal_ratio'] = np.where(
-        daily_protocol_metrics['protocol_daily_withdrawals'] > 0,
-        daily_protocol_metrics['protocol_daily_deposits'] / daily_protocol_metrics['protocol_daily_withdrawals'],
+    daily_pool_metrics_all['protocol_deposit_withdrawal_ratio'] = np.where(
+        daily_pool_metrics_all['protocol_daily_withdrawals'] > 0,
+        daily_pool_metrics_all['protocol_daily_deposits'] / daily_pool_metrics_all['protocol_daily_withdrawals'],
         np.inf
     )
     
-    daily_protocol_metrics['protocol_tvl_change'] = daily_protocol_metrics['protocol_tvl_total'].diff()
-    daily_protocol_metrics['protocol_tvl_change_pct'] = daily_protocol_metrics['protocol_tvl_total'].pct_change() * 100
+    daily_pool_metrics_all['protocol_tvl_change'] = daily_pool_metrics_all['protocol_tvl_total'].diff()
+    daily_pool_metrics_all['protocol_tvl_change_pct'] = daily_pool_metrics_all['protocol_tvl_total'].pct_change() * 100
     
-    # Calculate 7-day moving averages for protocol metrics
+    # Add 7-day moving averages for protocol metrics
     for metric in ['protocol_tvl_total', 'protocol_daily_deposits', 'protocol_daily_withdrawals', 'protocol_daily_net_flow']:
-        daily_protocol_metrics[f'{metric}_7d_ma'] = daily_protocol_metrics[metric].rolling(window=7, min_periods=1).mean()
-    
-    # Calculate average metrics per pool
-    daily_protocol_metrics['avg_tvl_per_pool'] = daily_protocol_metrics['protocol_tvl_total'] / daily_protocol_metrics['active_pools']
-    daily_protocol_metrics['avg_deposits_per_pool'] = daily_protocol_metrics['protocol_daily_deposits'] / daily_protocol_metrics['active_pools']
-    daily_protocol_metrics['avg_withdrawals_per_pool'] = daily_protocol_metrics['protocol_daily_withdrawals'] / daily_protocol_metrics['active_pools']
-    
-    # Identify high activity days
-    daily_protocol_metrics['high_deposit_day'] = daily_protocol_metrics['protocol_daily_deposits'] > daily_protocol_metrics['protocol_daily_deposits'].quantile(0.9)
-    daily_protocol_metrics['high_withdrawal_day'] = daily_protocol_metrics['protocol_daily_withdrawals'] > daily_protocol_metrics['protocol_daily_withdrawals'].quantile(0.9)
+        daily_pool_metrics_all[f'{metric}_ma7'] = daily_pool_metrics_all[metric].rolling(window=7, min_periods=1).mean()
     
     # =========================================
-    # PART 3: CURRENT TVL SNAPSHOT
+    # CURRENT TVL SNAPSHOT
     # =========================================
     
     tvl_snapshot = combined.groupby('pool').agg({
@@ -239,338 +406,214 @@ def agg_pools_data(deposits_df, withdrawals_df):
         'total_transactions', 'unique_users'
     ]
     
-    # Round all numerical values for cleaner output
+    tvl_snapshot = tvl_snapshot.reset_index()
+    
+    # Round all numerical values
     daily_pool_metrics = daily_pool_metrics.round(2)
-    daily_protocol_metrics = daily_protocol_metrics.round(2)
+    daily_pool_metrics_all = daily_pool_metrics_all.round(2)
     
-    return daily_pool_metrics, daily_protocol_metrics, tvl_snapshot
+    return daily_pool_metrics, daily_pool_metrics_all, tvl_snapshot
 
-@with_progress("Processing pool volume data")
-def process_volume_data(raw_volume):
-    """Process raw volume data from Tigris pools"""
-    if not ExceptionHandler.validate_dataframe(raw_volume, "Raw volume data", ['timestamp']):
-        raise ValueError("Invalid volume data structure")
-    
-    df = raw_volume.copy()
-    
-    # Flatten JSON pool column
-    df = flatten_json_column(df, 'pool')
-    
-    # Format timestamps
-    df = format_datetimes(df, ['timestamp'])
-    
-    # Replace token symbols
-    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
+# ==================================================
+# VOLUME CALCULATIONS
+# ==================================================
 
-    for col in token_columns:
-        df[col] = df[col].replace({
-            'mUSDC': 'USDC',
-            'mUSDT': 'USDT',
-            'mSolvBTC': 'SolvBTC',
-            'mxSolvBTC': 'xSolvBTC'
-        })
-    
-    # Map pool names
-    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
-
-    # Format token columns
-    df = format_token_columns(df, ['totalVolume0'], 'pool_token0_symbol')
-    df = format_token_columns(df, ['totalVolume1'], 'pool_token1_symbol')
-    
-    # Add USD conversions
-    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalVolume0'])
-    df = df.drop(columns=['index', 'usd'])
-    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalVolume1'])
-    df = df.drop(columns=['index', 'usd', 'pool_token0_symbol', 'pool_token1_symbol'])
-
-    # Trim dataframe
-    df = df[[
-        'timestamp', 'pool_name', 'pool', 
-        'totalVolume0', 'totalVolume1', 
-        'totalVolume0_usd', 'totalVolume1_usd', 'id'
-    ]]
-
-    return df
-
-@with_progress("Analyzing volume data by pool")
-def analyze_pool_volumes(df):
+@with_progress("Calculating daily volume metrics")
+def calculate_volume_metrics(volume_df):
     """
-    Analyze liquidity pool volume data and calculate key metrics.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame with columns: timestamp, pool_name, totalVolume0_usd, totalVolume1_usd
+    Calculate daily volume statistics for pools.
     
     Returns:
-    --------
-    pandas.DataFrame with additional calculated metrics
+        tuple: (daily_pool_volume, daily_pool_volume_all)
     """
     
-    # Make a copy to avoid modifying original
-    df = df.copy()
-    
-    # Ensure timestamp is datetime
+    df = volume_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['date'] = df['timestamp'].dt.date
     
-    # Sort by pool and timestamp for proper calculations
-    df = df.sort_values(['pool_name', 'timestamp'])
+    df = df.sort_values(['pool', 'timestamp'])
     
-    # Calculate total pool volume (cumulative)
-    df['total_pool_volume_usd'] = df['totalVolume0_usd'] + df['totalVolume1_usd']
+    df['total_volume'] = df.apply(get_volume_for_row, axis=1)
+
+    df['daily_volume0_usd'] = df['totalVolume0_usd']
+    df['daily_volume1_usd'] = df['totalVolume1_usd']
+    df['daily_total_volume_usd'] = df['total_volume'] 
+
+    # ===================================
+    # DAILY VOLUME BY POOL
+    # ===================================
     
-    # Calculate daily volumes (difference from previous day for each pool)
-    df['daily_volume0_usd'] = df.groupby('pool_name')['totalVolume0_usd'].diff()
-    df['daily_volume1_usd'] = df.groupby('pool_name')['totalVolume1_usd'].diff()
-    df['daily_pool_volume_usd'] = df['daily_volume0_usd'].fillna(0) + df['daily_volume1_usd'].fillna(0)
+    daily_pool_volume = df.groupby(['pool', 'date']).agg({
+        'daily_total_volume_usd': 'last',
+        'daily_volume0_usd': 'last',
+        'daily_volume1_usd': 'last'
+    }).reset_index()
     
-    # For first entry of each pool, use total as daily (no previous data)
-    first_entries = df.groupby('pool_name').first().index
-    mask = df.set_index('pool_name').index.isin(first_entries)
-    df.loc[mask & df['daily_pool_volume_usd'].isna(), 'daily_pool_volume_usd'] = \
-        df.loc[mask & df['daily_pool_volume_usd'].isna(), 'total_pool_volume_usd']
-    
-    # Calculate volume ratios (helps identify which token is traded more)
-    df['volume_ratio'] = np.where(
-        df['totalVolume1_usd'] > 0,
-        df['totalVolume0_usd'] / df['totalVolume1_usd'],
+    # Calculate volume ratio
+    daily_pool_volume['volume_ratio'] = np.where(
+        daily_pool_volume['daily_volume1_usd'] > 0,
+        daily_pool_volume['daily_volume0_usd'] / daily_pool_volume['daily_volume1_usd'],
         np.inf
     )
     
-    # Calculate 7-day moving average of daily volume
-    df['volume_7d_ma'] = df.groupby('pool_name')['daily_pool_volume_usd'].transform(
+    # add growth metrics
+    daily_pool_volume['volume_ma7'] = daily_pool_volume.groupby('pool')['daily_total_volume_usd'].transform(
         lambda x: x.rolling(window=7, min_periods=1).mean()
     )
-    
-    # Calculate volume growth rate
-    df['volume_growth_rate'] = df.groupby('pool_name')['daily_pool_volume_usd'].transform(
+    daily_pool_volume['volume_ma30'] = daily_pool_volume.groupby('pool')['daily_total_volume_usd'].transform(
+        lambda x: x.rolling(window=30, min_periods=1).mean()
+    )
+    daily_pool_volume['volume_growth_rate'] = daily_pool_volume.groupby('pool')['daily_total_volume_usd'].transform(
         lambda x: x.pct_change()
     )
     
-    # Mark significant volume days (> 90th percentile for each pool)
-    df['is_high_volume'] = df.groupby('pool_name')['daily_pool_volume_usd'].transform(
-        lambda x: x > x.quantile(0.9)
-    )
-    
-    return df
-
-@with_progress("Aggregating daily volume data")
-def agg_volume_data(volume_df):
-    """
-    Create a comprehensive daily volume statistics DataFrame.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        Input DataFrame with columns: timestamp, pool_name, totalVolume0_usd, totalVolume1_usd
-        
-    Returns:
-    --------
-    tuple: (daily_pool_stats, daily_protocol_stats)
-        - daily_pool_stats: Daily statistics for each pool
-        - daily_protocol_stats: Daily statistics for all pools combined
-    """
-    
-    # Make a copy to avoid modifying original
-    df = volume_df.copy()
-    
-    # Ensure timestamp is datetime and create date column
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df['timestamp'] = df['timestamp'].dt.date
-    
-    # Sort by pool and timestamp for proper calculations
-    df = df.sort_values(['pool_name', 'timestamp'])
-    
-    # Calculate total cumulative volume for each record
-    df['total_volume_usd'] = df['totalVolume0_usd'] + df['totalVolume1_usd']
-    
-    # Calculate daily volume (difference from previous day for each pool)
-    df['daily_volume0_usd'] = df.groupby('pool_name')['totalVolume0_usd'].diff()
-    df['daily_volume1_usd'] = df.groupby('pool_name')['totalVolume1_usd'].diff()
-    df['daily_total_volume_usd'] = df['daily_volume0_usd'].fillna(0) + df['daily_volume1_usd'].fillna(0)
-    
-    # For first entry of each pool, use total as daily
-    first_entries = df.groupby('pool_name').first().index
-    mask = df.set_index('pool_name').index.isin(first_entries)
-    df.loc[mask & df['daily_total_volume_usd'].isna(), 'daily_total_volume_usd'] = \
-        df.loc[mask & df['daily_total_volume_usd'].isna(), 'total_volume_usd']
-    
     # ===================================
-    # PART 1: DAILY STATS BY POOL
+    # DAILY VOLUME FOR ALL POOLS
     # ===================================
     
-    daily_pool_stats = df.groupby(['timestamp', 'pool_name']).agg({
-        'daily_total_volume_usd': 'last',  # Daily volume for the pool
-        'daily_volume0_usd': 'last',       # Token0 daily volume
-        'daily_volume1_usd': 'last'         # Token1 daily volume
-    }).reset_index()
-    
-    # Calculate volume ratio (Token0 / Token1)
-    daily_pool_stats['volume_ratio'] = np.where(
-        daily_pool_stats['daily_volume1_usd'] > 0,
-        daily_pool_stats['daily_volume0_usd'] / daily_pool_stats['daily_volume1_usd'],
-        np.inf
-    )
-    
-    # Calculate 7-day moving average for each pool
-    daily_pool_stats['volume_7d_ma'] = daily_pool_stats.groupby('pool_name')['daily_total_volume_usd'].transform(
-        lambda x: x.rolling(window=7, min_periods=1).mean()
-    )
-    
-    # Calculate growth rate (day-over-day percentage change)
-    daily_pool_stats['growth_rate'] = daily_pool_stats.groupby('pool_name')['daily_total_volume_usd'].transform(
-        lambda x: x.pct_change() * 100
-    )
-    
-    # Identify significant volume days (> 90th percentile for each pool)
-    daily_pool_stats['is_significant_volume'] = daily_pool_stats.groupby('pool_name')['daily_total_volume_usd'].transform(
-        lambda x: x > x.quantile(0.9)
-    )
-    
-    # Add pool rank by daily volume
-    daily_pool_stats['daily_rank'] = daily_pool_stats.groupby('timestamp')['daily_total_volume_usd'].rank(
-        method='dense', ascending=False
-    )
-    
-    # Round numerical values for cleaner output
-    daily_pool_stats = daily_pool_stats.round({
-        'daily_total_volume_usd': 2,
-        'daily_volume0_usd': 2,
-        'daily_volume1_usd': 2,
-        'volume_ratio': 3,
-        'volume_7d_ma': 2,
-        'growth_rate': 2
-    })
-    
-    # ===================================
-    # PART 2: DAILY STATS FOR ALL POOLS COMBINED
-    # ===================================
-    
-    daily_protocol_stats = daily_pool_stats.groupby('timestamp').agg({
-        'daily_total_volume_usd': 'sum',      # Total volume across all pools
-        'daily_volume0_usd': 'sum',           # Total Token0 volume
-        'daily_volume1_usd': 'sum',           # Total Token1 volume
-        'is_significant_volume': 'sum',       # Count of pools with significant volume
-        'pool_name': 'count'                  # Number of active pools
+    daily_pool_volume_all = daily_pool_volume.groupby('date').agg({
+        'daily_total_volume_usd': 'sum',
+        'daily_volume0_usd': 'sum',
+        'daily_volume1_usd': 'sum',
+        'pool': 'count'
     }).reset_index()
 
-    # Rename columns for clarity
-    daily_protocol_stats.columns = [
-        'timestamp',
+    daily_pool_volume_all.columns = [
+        'date',
         'total_volume_all_pools',
         'total_volume0_all_pools',
         'total_volume1_all_pools',
-        'pools_with_significant_volume',
         'active_pools_count'
     ]
 
-    # Calculate protocol-wide volume ratio
-    daily_protocol_stats['volume_ratio_all_pools'] = np.where(
-        daily_protocol_stats['total_volume1_all_pools'] > 0,
-        daily_protocol_stats['total_volume0_all_pools'] / daily_protocol_stats['total_volume1_all_pools'],
+    # Calculate all pool metrics
+    daily_pool_volume_all['volume_ratio_all_pools'] = np.where(
+        daily_pool_volume_all['total_volume1_all_pools'] > 0,
+        daily_pool_volume_all['total_volume0_all_pools'] / daily_pool_volume_all['total_volume1_all_pools'],
         np.inf
     )
     
-    # Calculate 7-day moving average for protocol
-    daily_protocol_stats['volume_7d_ma_all_pools'] = daily_protocol_stats['total_volume_all_pools'].rolling(
-        window=7, min_periods=1
+    daily_pool_volume_all['volume_ma7_all_pools'] = daily_pool_volume_all[
+        'total_volume_all_pools'].rolling(
+            window=7, min_periods=1
     ).mean()
     
-    # Calculate protocol-wide growth rate
-    daily_protocol_stats['growth_rate_all_pools'] = daily_protocol_stats['total_volume_all_pools'].pct_change() * 100
-
-    # Identify significant volume days for protocol (> 90th percentile)
-    threshold = daily_protocol_stats['total_volume_all_pools'].quantile(0.9)
-    daily_protocol_stats['is_significant_volume_day'] = daily_protocol_stats['total_volume_all_pools'] > threshold
-
-    # Add some additional protocol metrics
-    daily_protocol_stats['avg_volume_per_pool'] = (
-        daily_protocol_stats['total_volume_all_pools'] / daily_protocol_stats['active_pools_count']
+    daily_pool_volume_all['volume_ma30_all_pools'] = daily_pool_volume_all[
+        'total_volume_all_pools'].rolling(
+            window=30, min_periods=1
+    ).mean()
+    
+    daily_pool_volume_all['volume_growth_rate'] = daily_pool_volume_all[
+        'total_volume_all_pools'].pct_change()
+    
+    daily_pool_volume_all['avg_volume_per_pool'] = (
+        daily_pool_volume_all['total_volume_all_pools'] / daily_pool_volume_all['active_pools_count']
     )
-
-    # Calculate concentration (what % of volume came from top pool)
-    top_pool_volumes = daily_pool_stats.groupby('timestamp')['daily_total_volume_usd'].max()
-    print(top_pool_volumes)
-    print(daily_protocol_stats)
-
-    daily_protocol_stats['top_pool_concentration'] = (
-        top_pool_volumes / daily_protocol_stats['total_volume_all_pools'] * 100
-    )
-
-    # Round numerical values
-    daily_protocol_stats = daily_protocol_stats.round({
-        'total_volume_all_pools': 2,
-        'total_volume0_all_pools': 2,
-        'total_volume1_all_pools': 2,
-        'volume_ratio_all_pools': 3,
-        'volume_7d_ma_all_pools': 2,
-        'growth_rate_all_pools': 2,
-        'avg_volume_per_pool': 2,
-        'top_pool_concentration': 2
-    })
     
-    return daily_pool_stats, daily_protocol_stats
-
-@with_progress("Processing pool fees data")
-def process_fees_data(raw_fees):
-    """Process raw fees data from Tigris pools"""
-    if not ExceptionHandler.validate_dataframe(raw_fees, "Raw fees data", ['timestamp']):
-        raise ValueError("Invalid fees data structure")
+    daily_pool_volume = daily_pool_volume.round(2)
+    daily_pool_volume_all = daily_pool_volume_all.round(2)
     
-    df = raw_fees.copy()
+    return daily_pool_volume, daily_pool_volume_all
+
+# ==================================================
+# FEE CALCULATIONS
+# ==================================================
+
+@with_progress("Calculating daily fee metrics")
+def calculate_fee_metrics(fees_df):
+    """
+    Calculate daily fee statistics for pools.
     
-    # Flatten JSON pool column
-    df = flatten_json_column(df, 'pool')
-
-    # Format timestamps
-    df = format_datetimes(df, ['timestamp'])
+    Returns:
+        tuple: (daily_pool_fees, daily_pool_fees_all)
+    """
     
-    # Replace token symbols
-    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
+    df = fees_df.copy()
 
-    for col in token_columns:
-        df[col] = df[col].replace({
-            'mUSDC': 'USDC',
-            'mUSDT': 'USDT'
-        })
-
-    # Map pool names
-    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
+    df = df.sort_values(['pool', 'timestamp'])
     
-    # Format token columns
-    df = format_token_columns(df, ['totalFees0'], 'pool_token0_symbol')
-    df = format_token_columns(df, ['totalFees1'], 'pool_token1_symbol')
+    df['total_fees_usd'] = df['totalFees0_usd'] + df['totalFees1_usd']
     
-    # Add USD conversions
-    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalFees0'])
-    df = df.drop(columns=['index', 'usd'])
-    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalFees1'])
+    # Daily fees by pool
+    daily_pool_fees = df.groupby(['pool', 'timestamp']).agg({
+        'totalFees0_usd': 'sum',
+        'totalFees1_usd': 'sum',
+        'total_fees_usd': 'sum'
+    }).reset_index()
 
-    df = df.drop(columns=['index', 'usd', 'pool_token0_symbol', 'pool_token1_symbol'])
-
-    df = df[[
-        'timestamp', 'pool_name', 'pool', 'totalFees0', 'totalFees1', 
-        'totalFees0_usd', 'totalFees1_usd', 'id'
-        ]]
+    daily_pool_fees_all = daily_pool_fees.groupby('timestamp').agg({
+        'total_fees_usd': 'sum',
+        'totalFees0_usd': 'sum',
+        'totalFees1_usd': 'sum',
+        'pool': 'count'
+    }).reset_index()
     
-    return df
+    # add 7-day moving averages
+    daily_pool_fees_all['fees_ma7'] = daily_pool_fees_all['total_fees_usd'].rolling(
+        window=7, min_periods=1).mean()
+    daily_pool_fees_all['fees_ma30'] = daily_pool_fees_all['total_fees_usd'].rolling(
+        window=30, min_periods=1).mean()
+    
+    daily_pool_fees_all['fees_growth'] = daily_pool_fees_all[
+        'total_fees_usd'].pct_change()
+    
+    return daily_pool_fees.round(2), daily_pool_fees_all.round(2)
 
-@with_progress("Creating daily fees statistics")
-def agg_fees_data(df):
-    daily_fees = df.groupby(['timestamp']).agg(
-            fees_0 =('totalFees0', 'sum'),
-            fees_1 =('totalFees1', 'sum'),
-            fees_0_usd = ('totalFees0_usd', 'sum'),
-            fees_1_usd = ('totalFees1_usd', 'sum')
-        ).reset_index().fillna(0)
+# ==================================================
+# EFFICIENCY METRICS
+# ==================================================
 
-    daily_fees['total_fees'] = daily_fees['fees_0_usd'] + daily_fees['fees_1_usd']
+@with_progress("Calculating pool efficiency metrics")
+def calculate_efficiency_metrics(tvl_snapshot, daily_volume, daily_fees):
+    """Calculate pool efficiency and performance metrics."""
+    
+    # Get latest TVL for each pool
+    tvl_by_pool = tvl_snapshot.set_index('pool')[['current_tvl_total']]
+    
+    # Get 7-day average volume for each pool
+    recent_volume = daily_volume[daily_volume['date'] >= (datetime.now().date() - timedelta(days=7))]
+    avg_volume_7d = recent_volume.groupby('pool')['daily_total_volume_usd'].mean()
+    
+    # Get 7-day average fees for each pool
+    recent_fees = daily_fees[daily_fees['timestamp'] >= (datetime.now().date() - timedelta(days=7))]
+    avg_fees_7d = recent_fees.groupby('pool')['total_fees_usd'].mean()
+    
+    # Combine metrics
+    efficiency = tvl_by_pool.copy()
+    efficiency['avg_daily_volume_7d'] = avg_volume_7d
+    efficiency['avg_daily_fees_7d'] = avg_fees_7d
+    
+    # Calculate efficiency ratios
+    efficiency['volume_tvl_ratio'] = efficiency['avg_daily_volume_7d'] / efficiency['current_tvl_total']
+    efficiency['capital_efficiency'] = efficiency['volume_tvl_ratio'] * 365  # Annualized turnover
+    efficiency['fee_apr'] = (efficiency['avg_daily_fees_7d'] * 365 / efficiency['current_tvl_total']) * 100
+    
+    # Add risk score based on efficiency metrics
+    efficiency['efficiency_score'] = (
+        efficiency['capital_efficiency'].rank(pct=True) * 0.4 +
+        efficiency['fee_apr'].rank(pct=True) * 0.3 +
+        efficiency['volume_tvl_ratio'].rank(pct=True) * 0.3
+    ) * 100
+    
+    efficiency = efficiency.reset_index().round(2)
+    
+    return efficiency
 
-    return daily_fees
+# ==================================================
+# MAIN EXECUTION
+# ==================================================
 
-def main():
+def main(test_mode=False, sample_size=False, skip_bigquery=False):
     """Main function to process pool data."""
     ProgressIndicators.print_header("POOLS DATA PROCESSING PIPELINE")
+
+    if test_mode:
+        print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
+        if sample_size:
+            print(f"{'Using sample size: ' + str(sample_size):^60}")
+        if skip_bigquery:
+            print(f"{'Skipping BigQuery uploads':^60}")
+        print(f"{'─' * 60}\n")
 
     try:
         # Load environment variables
@@ -578,14 +621,15 @@ def main():
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.8f}'.format
         ProgressIndicators.print_step("Environment loaded successfully", "success")
-
-        # Initialize clients
-        ProgressIndicators.print_step("Initializing database clients", "start")
-        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
-        ProgressIndicators.print_step("Database clients initialized", "success")
+        
+        if not skip_bigquery:
+            # Initialize clients
+            ProgressIndicators.print_step("Initializing database clients", "start")
+            bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+            ProgressIndicators.print_step("Database clients initialized", "success")
 
         # ==========================================================
-        # Get raw subgraph data
+        # FETCH RAW DATA
         # ==========================================================
 
         # Get deposits data
@@ -625,7 +669,7 @@ def main():
         ProgressIndicators.print_step(f"Loaded {len(fees_data)} fee records", "success")
         
         # ==========================================================
-        # Upload raw data to BigQuery
+        # UPLOAD RAW DATA TO BIGQUERY
         # ==========================================================
 
         ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
@@ -640,13 +684,14 @@ def main():
             (fees_data, 'pool_fees_raw', 'id')
         ]
 
-        # for dataset, table_name, id_column in raw_datasets:
-        #     if dataset is not None and len(dataset) > 0:
-        #         bq.update_table(dataset, 'raw_data', table_name, id_column)
-        #         ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+        if not skip_bigquery:
+            for dataset, table_name, id_column in raw_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'raw_data', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # ==========================================================
-        # Clean raw data
+        # CLEAN DATA
         # ==========================================================
 
         deposits_clean = process_pools_data(deposits_data, 'deposit')
@@ -655,10 +700,10 @@ def main():
         fees_clean = process_fees_data(fees_data)
 
         # ==========================================================
-        # Upload clean data to BigQuery
+        # UPLOAD CLEAN DATA TO BIGQUERY STAGING
         # ==========================================================
 
-        ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
+        ProgressIndicators.print_step("Uploading clean data to BigQuery staging", "start")
         
         volume_clean['id'] = volume_clean['id'].astype('int')
         fees_clean['id'] = fees_clean['id'].astype('int')
@@ -669,71 +714,152 @@ def main():
             (volume_clean, 'pool_volume_clean', 'id'),
             (fees_clean, 'pool_fees_clean', 'id')
         ]
-
-        # for dataset, table_name, id_column in clean_datasets:
-        #     if dataset is not None and len(dataset) > 0:
-        #         bq.update_table(dataset, 'staging', table_name, id_column)
-        #         ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-
-        # ==========================================================
-        # Aggregate data
-        # ==========================================================
-
-        agg_volume = analyze_pool_volumes(volume_clean)
-        agg_volume.to_csv('agg_volume.csv')
-
-        agg_volume_by_pool, agg_all_volume = agg_volume_data(volume_clean)
-        agg_volume_by_pool.to_csv('agg_volume_by_pool.csv')
-        agg_all_volume.to_csv('agg_all_volume.csv')
-
-        agg_tvl_by_pool, agg_all_tvl, tvl_snapshot = agg_pools_data(deposits_clean, withdrawals_clean)
-        agg_tvl_by_pool.to_csv('agg_tvl_by_pool.csv')
-        agg_all_tvl.to_csv('agg_all_tvl.csv')
-        tvl_snapshot.to_csv('tvl_snapshot.csv')
         
-        agg_fees = agg_fees_data(fees_clean)
-        agg_fees.to_csv('agg_fees.csv')
+        if not skip_bigquery:
+            for dataset, table_name, id_column in clean_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'staging', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # save_datasets = [
-        #     (agg_volume), (agg_volume_by_pool), (agg_all_volume), 
-        #     (agg_tvl_by_pool), (agg_all_tvl), (agg_fees)
-        # ]
-
-        # for dataset in save_datasets:
-        #     dataset.to_csv(f'{dataset}.csv')
-
-
-
-
-
-        # daily_pools_by_pool = create_daily_pools_by_pool_df(deposits_clean, withdrawals_clean)
-        # pool_summary = create_pools_summary_df(deposits_clean, withdrawals_clean)
-        # daily_volume = aggregate_volume_by_pool_by_day(volume_clean)
-        # daily_fees = aggregate_fees_by_day(fees_clean)
-        
         # ==========================================================
-        # Upload aggregate data to BigQuery
+        # CALCULATE METRICS
+        # ==========================================================
+
+        # Calculate TVL and daily metrics
+        daily_pool_tvl, daily_protocol_tvl, tvl_snapshot = calculate_tvl_and_daily_metrics(
+            deposits_clean, withdrawals_clean
+        )
+        
+        # Calculate volume metrics
+        daily_pool_volume, daily_pool_volume_all = calculate_volume_metrics(volume_clean)
+        
+        # Calculate fee metrics
+        daily_pool_fees, daily_pool_fees_all = calculate_fee_metrics(fees_clean)
+        
+        # Calculate efficiency metrics
+        efficiency_metrics = calculate_efficiency_metrics(
+            tvl_snapshot, daily_pool_volume, daily_pool_fees
+        )
+
+        # ==========================================================
+        # UPLOAD AGGREGATED DATA TO BIGQUERY MARTS
         # ==========================================================
         
-        ProgressIndicators.print_step("Uploading aggregate data to BigQuery", "start")
+        ProgressIndicators.print_step("Uploading aggregated data to BigQuery marts", "start")
 
-        # agg_datasets = [
-        #     (daily_pools_by_pool, 'agg_daily_pool_txns', 'timestamp_'),
-        #     (daily_volume, 'agg_daily_volume', 'timestamp'),
-        #     (daily_fees, 'agg_daily_fees', 'timestamp')
-        # ]
+        # Time series data (use update_table for append)
+        timeseries_datasets = [
+            (daily_pool_tvl, 'm_pools_daily_tvl_by_pool', 'date'),
+            (daily_protocol_tvl, 'm_pools_daily_tvl', 'date'),
+            (daily_pool_volume, 'm_pools_daily_volume_by_pool', 'date'),
+            (daily_pool_volume_all, 'm_pools_daily_volume', 'date'),
+            (daily_pool_fees, 'm_pools_daily_fees_by_pool', 'timestamp'),
+            (daily_pool_fees_all, 'm_pools_daily_fees', 'timestamp')
+        ]
 
-        # for dataset, table_name, id_column in agg_datasets:
-        #     if dataset is not None and len(dataset) > 0:
-        #         bq.update_table(dataset, 'marts', table_name, id_column)
-        #         ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+        if not skip_bigquery:
+            for dataset, table_name, id_column in timeseries_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'marts', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # ProgressIndicators.print_step("Uploading pool breakdown data to BigQuery", "start")
-        # if pool_summary is not None and len(pool_summary) > 0:
-        #     bq.upsert_table_by_id(pool_summary, 'marts', 'agg_pools_by_pool', 'pool')
-        #     ProgressIndicators.print_step("Uploaded pools breakdown to BigQuery", "success")
+        # Snapshot data (use upsert for replace)
+        snapshot_datasets = [
+            (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
+            (efficiency_metrics, 'm_pools_efficiency', 'pool')
+        ]
 
+        for dataset, name, col in snapshot_datasets:
+            dataset.to_csv(f'{name}.csv')
+        
+        if not skip_bigquery:
+            for dataset, table_name, id_column in snapshot_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
+                    ProgressIndicators.print_step(f"Upserted {table_name} to BigQuery", "success")
+
+        # ==========================================================
+        # DISPLAY SUMMARY STATISTICS
+        # ==========================================================
+        
+        ProgressIndicators.print_step("Calculating summary statistics", "start")
+        
+        # Calculate key metrics
+        total_tvl = tvl_snapshot['current_tvl_total'].sum()
+        total_volume_7d = daily_pool_volume[
+            daily_pool_volume['date'] >= (datetime.now().date() - timedelta(days=7))
+        ]['daily_total_volume_usd'].sum()
+        total_fees_7d = daily_pool_fees[
+            daily_pool_fees['timestamp'] >= (datetime.now().date() - timedelta(days=7))
+        ]['total_fees_usd'].sum()
+        
+        # Calculate averages
+        avg_efficiency = efficiency_metrics['efficiency_score'].mean()
+        avg_fee_apr = efficiency_metrics['fee_apr'].mean()
+        best_performing_pool = efficiency_metrics.loc[
+            efficiency_metrics['efficiency_score'].idxmax(), 'pool'
+        ] if len(efficiency_metrics) > 0 else 'N/A'
+        
+        # Count active pools
+        active_pools = tvl_snapshot[tvl_snapshot['current_tvl_total'] > 0]['pool'].nunique()
+        
+        ProgressIndicators.print_step("Summary statistics calculated", "success")
+        
+        # Display summary
+        ProgressIndicators.print_summary_box(
+            "💰 LIQUIDITY POOLS SUMMARY",
+            {
+                "Total TVL": f"${total_tvl:,.2f}",
+                "7-Day Volume": f"${total_volume_7d:,.2f}",
+                "7-Day Fees": f"${total_fees_7d:,.2f}",
+                "Active Pools": active_pools,
+                "Average Fee APR": f"{avg_fee_apr:.2f}%",
+                "Average Efficiency Score": f"{avg_efficiency:.1f}/100",
+                "Best Performing Pool": best_performing_pool
+            }
+        )
+        
+        # Display per-pool breakdown
+        print("\n📊 Per-Pool TVL Breakdown:")
+        print("-" * 50)
+        for _, row in tvl_snapshot.iterrows():
+            if row['current_tvl_total'] > 0:
+                print(f"  {row['pool']:<25} ${row['current_tvl_total']:>15,.2f}")
+        
+        # Display efficiency rankings
+        print("\n🏆 Pool Efficiency Rankings:")
+        print("-" * 50)
+        efficiency_sorted = efficiency_metrics.sort_values('efficiency_score', ascending=False)
+        for idx, row in efficiency_sorted.head(5).iterrows():
+            print(f"  {row['pool']:<25} Score: {row['efficiency_score']:>6.1f}/100")
+
+         # After all processing and before the final return
+        
+        # Build the metrics dictionary to return
+        metrics_results = {
+            'tvl_snapshot': tvl_snapshot,
+            'efficiency_metrics': efficiency_metrics,
+            'daily_pool_tvl': daily_pool_tvl,
+            'daily_protocol_tvl': daily_protocol_tvl,
+            'daily_pool_volume': daily_pool_volume,
+            'daily_pool_volume_all': daily_pool_volume_all,
+            'daily_pool_fees': daily_pool_fees,
+            'daily_pool_fees_all': daily_pool_fees_all,
+            'total_tvl': total_tvl,
+            'active_pools': active_pools,
+            'total_volume_7d': total_volume_7d,
+            'total_fees_7d': total_fees_7d,
+            'avg_efficiency': avg_efficiency,
+            'avg_fee_apr': avg_fee_apr,
+            'best_performing_pool': best_performing_pool
+        }
+        
+        # Save metrics snapshot for report generation
+        save_metrics_snapshot(metrics_results, 'pools')
+        
         ProgressIndicators.print_header("🚀 POOLS PROCESSING COMPLETED SUCCESSFULLY 🚀")
+        
+        return metrics_results
         
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
@@ -745,120 +871,73 @@ def main():
         print(f"{'─' * 50}")
         raise
 
+################################################
+# TEST HELPERS
+################################################
+
+def quick_test(sample_size=1000):
+    """
+    Quick test function for development.
+    Uses local CSV, samples 1000 rows, skips BigQuery.
+    
+    Usage:
+        from scripts.process_swaps_data import quick_test
+        results = quick_test()
+        results['pool_metrics']
+    """
+    return main(test_mode=True, sample_size=sample_size, skip_bigquery=True)
+
+
+def inspect_data(results, show_head=5):
+    """
+    Helper function to inspect all output dataframes.
+    
+    Usage:
+        results = quick_test()
+        inspect_data(results)
+    """
+    print(f"\n{'═' * 80}")
+    print(f"{'DATA INSPECTION':^80}")
+    print(f"{'═' * 80}\n")
+    
+    for name, df in results.items():
+        if isinstance(df, pd.DataFrame):
+            print(f"\n{name.upper()}")
+            print(f"{'─' * 80}")
+            print(f"Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
+            print(f"\nColumns: {', '.join(df.columns.tolist())}")
+            print(f"\nFirst {show_head} rows:")
+            print(df.head(show_head).to_string())
+            print(f"\nData types:")
+            print(df.dtypes)
+            print(f"\nMemory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+            print(f"\n{'─' * 80}\n")
+
+
+def save_test_outputs(results, output_dir='./test_outputs'):
+    """
+    Save all test outputs to CSV files for manual inspection.
+    
+    Usage:
+        results = quick_test()
+        save_test_outputs(results)
+    """
+    import os
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for name, df in results.items():
+        if isinstance(df, pd.DataFrame):
+            filepath = os.path.join(output_dir, f"{name}.csv")
+            df.to_csv(filepath, index=False)
+            print(f"✓ Saved {name} to {filepath}")
+    
+    print(f"\n✅ All outputs saved to {output_dir}/")
+
 if __name__ == "__main__":
     results = main()
 
-
-
-
-
-# @with_progress("Creating daily pools by pool aggregation")
-# def create_daily_pools_by_pool_df(deposits_df, withdrawals_df):
-#     """Create daily pool activity data aggregated by pool"""
-#     # Combine deposits and withdrawals
-#     combined_df = pd.concat([deposits_df, withdrawals_df], ignore_index=True)
-    
-#     # Create aggregations by pool
-#     daily_pools_by_pool = combined_df.groupby(['timestamp_', 'pool']).agg(
-#         total_deposits=('transaction_type', lambda x: (x == 'deposit').sum()),
-#         total_withdrawals=('transaction_type', lambda x: (x == 'withdrawal').sum()),
-#         total_transactions=('sender', 'count')
-#     ).assign(
-#         total_deposit_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby(['timestamp_', 'pool'])['amount0_usd'].sum(),
-#         total_deposit_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby(['timestamp_', 'pool'])['amount1_usd'].sum(),
-#         total_withdrawal_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby(['timestamp_', 'pool'])['amount0_usd'].sum(),
-#         total_withdrawal_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby(['timestamp_', 'pool'])['amount1_usd'].sum()
-#     ).reset_index()
-    
-#     # Pivot data by pool
-#     daily_pools_by_pool_pivot = daily_pools_by_pool.pivot(
-#         index='timestamp_', columns='pool'
-#     ).fillna(0)
-    
-#     # Flatten column names
-#     daily_pools_by_pool_pivot.columns = [
-#         '_'.join(col).strip() for col in daily_pools_by_pool_pivot.columns.values
-#     ]
-#     daily_pools_by_pool_final = daily_pools_by_pool_pivot.reset_index()
-
-#     deposit_amt_0_cols = [col for col in daily_pools_by_pool_final.columns if col.startswith('total_deposit_amt_0')]
-#     deposit_amt_1_cols = [col for col in daily_pools_by_pool_final.columns if col.startswith('total_deposit_amt_1')]
-#     withdrawal_amt_0_cols = [col for col in daily_pools_by_pool_final.columns if col.startswith('total_deposit_amt_0')]
-#     withdrawal_amt_1_cols = [col for col in daily_pools_by_pool_final.columns if col.startswith('total_deposit_amt_1')]
-    
-#     if deposit_amt_0_cols and deposit_amt_1_cols:
-#         daily_pools_by_pool_final['total_deposit_amt'] = daily_pools_by_pool_final[deposit_amt_0_cols].sum(axis=1) + daily_pools_by_pool_final[deposit_amt_1_cols].sum(axis=1)
-
-#     if withdrawal_amt_0_cols and withdrawal_amt_1_cols:
-#         daily_pools_by_pool_final['total_withdrawal_amt'] = daily_pools_by_pool_final[withdrawal_amt_0_cols].sum(axis=1) + daily_pools_by_pool_final[withdrawal_amt_0_cols].sum(axis=1)
-    
-#     return daily_pools_by_pool_final
-
-# @with_progress("Creating pool summary statistics")
-# def create_pools_summary_df(deposits_df, withdrawals_df):
-#     """Create summary statistics by pool"""
-#     # Combine deposits and withdrawals
-#     combined_df = pd.concat([deposits_df, withdrawals_df], ignore_index=True)
-    
-#     pool_summary = combined_df.groupby('pool').agg(
-#         total_deposits=('transaction_type', lambda x: (x == 'deposit').sum()),
-#         total_withdrawals=('transaction_type', lambda x: (x == 'withdrawal').sum()),
-#         total_transactions=('sender', 'count')
-#     ).assign(
-#         total_deposit_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby('pool')['amount0_usd'].sum(),
-#         total_deposit_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby('pool')['amount1_usd'].sum(),
-#         total_withdrawal_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby('pool')['amount0_usd'].sum(),
-#         total_withdrawal_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby('pool')['amount1_usd'].sum()
-#     ).reset_index()
-
-#     return pool_summary
-
-# @with_progress("Creating daily pools aggregation")
-# def create_daily_pools_df(deposits_df, withdrawals_df):
-#     """Create daily aggregated pool activity data"""
-#     # Combine deposits and withdrawals
-#     combined_df = pd.concat([deposits_df, withdrawals_df], ignore_index=True)
-    
-#     # Create aggregations
-#     daily_pools = combined_df.groupby(['timestamp_']).agg(
-#         total_deposits=('transaction_type', lambda x: (x == 'deposit').sum()),
-#         total_withdrawals=('transaction_type', lambda x: (x == 'withdrawal').sum()),
-#         total_transactions=('sender', 'count'),
-#     ).assign(
-#         total_deposit_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby('timestamp_')['amount0_usd'].sum(),
-#         total_deposit_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'deposit'].groupby('timestamp_')['amount1_usd'].sum(),
-#         total_withdrawal_amt_0 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby('timestamp_')['amount0_usd'].sum(),
-#         total_withdrawal_amt_1 = lambda df: combined_df[combined_df['transaction_type'] == 'withdrawal'].groupby('timestamp_')['amount1_usd'].sum()
-#     ).reset_index().fillna(0)
-
-#     daily_pools['total_deposit_amt'] = daily_pools['total_deposit_amt_0'] + daily_pools['total_deposit_amt_1']
-#     daily_pools['total_withdrawal_amt'] = daily_pools['total_withdrawal_amt_0'] + daily_pools['total_withdrawal_amt_1']
-
-#     return daily_pools
-
-# @with_progress("Creating daily volume statistics")
-# def aggregate_volume_by_pool_by_day(df):
-#     # Create daily volume aggregations by pool
-#     daily_volume_by_pool = df.groupby(['timestamp', 'pool']).agg(
-#         total_volume_0_usd = ('totalVolume0_usd', 'sum'),
-#         total_volume_1_usd = ('totalVolume1_usd', 'sum')
-#     ).reset_index()
-
-#     # Pivot data by pool
-#     vol_by_pools_pivot = daily_volume_by_pool.pivot(
-#         index='timestamp', columns='pool'
-#     ).fillna(0)
-
-#     # Flatten column names
-#     vol_by_pools_pivot.columns = [
-#         '_'.join(col).strip() for col in vol_by_pools_pivot.columns.values
-#     ]
-#     daily_volume_by_pool_final = vol_by_pools_pivot.reset_index()
-
-#     vol_0_cols = [col for col in daily_volume_by_pool_final.columns if col.startswith('total_volume_0')]
-#     vol_1_cols = [col for col in daily_volume_by_pool_final.columns if col.startswith('total_volume_1')]
-
-#     if vol_0_cols and vol_1_cols:
-#         daily_volume_by_pool_final['total_volume'] = daily_volume_by_pool_final[vol_0_cols].sum(axis=1) + daily_volume_by_pool_final[vol_1_cols].sum(axis=1)
-
-#     return daily_volume_by_pool_final
+    # For testing, uncomment one of these:
+    # results = quick_test(sample_size=500)
+    # inspect_data(results)
+    # save_test_outputs(results)
