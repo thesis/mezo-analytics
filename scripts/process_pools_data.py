@@ -732,73 +732,9 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 50}")
         raise
 
-################################################
-# TEST HELPERS
-################################################
-
-def quick_test(sample_size=1000):
-    """
-    Quick test function for development.
-    Uses local CSV, samples 1000 rows, skips BigQuery.
-    
-    Usage:
-        from scripts.process_swaps_data import quick_test
-        results = quick_test()
-        results['pool_metrics']
-    """
-    return main(test_mode=True, sample_size=sample_size, skip_bigquery=True)
-
-
-def inspect_data(results, show_head=5):
-    """
-    Helper function to inspect all output dataframes.
-    
-    Usage:
-        results = quick_test()
-        inspect_data(results)
-    """
-    print(f"\n{'═' * 80}")
-    print(f"{'DATA INSPECTION':^80}")
-    print(f"{'═' * 80}\n")
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            print(f"\n{name.upper()}")
-            print(f"{'─' * 80}")
-            print(f"Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
-            print(f"\nColumns: {', '.join(df.columns.tolist())}")
-            print(f"\nFirst {show_head} rows:")
-            print(df.head(show_head).to_string())
-            print(f"\nData types:")
-            print(df.dtypes)
-            print(f"\nMemory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-            print(f"\n{'─' * 80}\n")
-
-
-def save_test_outputs(results, output_dir='./test_outputs'):
-    """
-    Save all test outputs to CSV files for manual inspection.
-    
-    Usage:
-        results = quick_test()
-        save_test_outputs(results)
-    """
-    import os
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            filepath = os.path.join(output_dir, f"{name}.csv")
-            df.to_csv(filepath, index=False)
-            print(f"✓ Saved {name} to {filepath}")
-    
-    print(f"\n✅ All outputs saved to {output_dir}/")
-
 if __name__ == "__main__":
     results = main()
 
-    # For testing, uncomment one of these:
-    # results = quick_test(sample_size=500)
-    # inspect_data(results)
-    # save_test_outputs(results)
+    # results = tests.quick_test(sample_size=500)
+    # tests.inspect_data(results)
+    # tests.save_test_outputs(results)
