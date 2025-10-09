@@ -1,496 +1,491 @@
 #!/usr/bin/env python3
 """
-Generate Summary Reports for All Data Processing Scripts
-Exports key metrics to markdown files for daily reporting
+Generate summary reports from processing scripts and upload to Linear.
+
+This script:
+1. Imports and runs data processing scripts to get real metrics
+2. Generates formatted markdown reports 
+3. Uploads reports to Linear docs via GraphQL API
 """
 
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, Any
-from io import StringIO
-import sys
 import os
+import sys
+import json
+import requests
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+import pandas as pd
 
-try:
-    from linear_api import LinearClient
-    LINEAR_AVAILABLE = True
-except ImportError:
-    LINEAR_AVAILABLE = False
-    print("⚠️  linear-api package not installed. Linear integration disabled.")
-
-# Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def display_bridge_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of bridge metrics (moved from process_bridge_data.py)"""
+# import processing scripts that generate summaries
+from scripts.archive.pools_v3 import main as process_pools
 
-    print("\n" + "="*60)
-    print("📊 BRIDGE VOLUME METRICS SUMMARY")
-    print("="*60)
+# set the linear project id for the data reports project
+LINEAR_PROJECT_ID='8cf7b30b-0031-4f26-b3ad-59828750fce3'
+LINEAR_DOC_ID = None
+LINEAR_SUMMARY_DOC_ID = 'd35f442d-73f8-4462-a1fb-f8e99704ae96'
 
-    # Overall summary
-    summary = metrics['summary_overall'].iloc[0]
-    print(f"\n💰 TVL: ${summary['current_tvl']:,.0f} ({summary['tvl_growth_7d_pct']:+.1f}% 7d)")
-    print(f"💱 Net Flow (7d): ${summary['net_flow_7d']:,.0f}")
+# ==================================================
+# LINEAR API CLIENT
+# ==================================================
 
-    # Calculate deposit/withdrawal metrics for each timeframe
-    current_date = df['date'].max()
-
-    # Define timeframes
-    timeframes = {
-        '24h': df[df['date'] == current_date],
-        '7d': df[df['date'] >= current_date - timedelta(days=7)],
-        '30d': df[df['date'] >= current_date - timedelta(days=30)],
-        'All-time': df
-    }
-
-    # Print deposit and withdrawal metrics
-    print("\n📥 DEPOSITS:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Count':>10} {'Amount':>20}")
-    print("-" * 50)
-
-    for period_name, period_data in timeframes.items():
-        deposits = period_data[period_data['type'] == 'deposit']
-        deposit_count = len(deposits)
-        deposit_amount = deposits['amount_usd'].sum()
-        print(f"{period_name:<12} {deposit_count:>10,} ${deposit_amount:>18,.0f}")
-
-    print("\n📤 WITHDRAWALS:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Count':>10} {'Amount':>20}")
-    print("-" * 50)
-
-    for period_name, period_data in timeframes.items():
-        withdrawals = period_data[period_data['type'] == 'withdrawal']
-        withdrawal_count = len(withdrawals)
-        withdrawal_amount = withdrawals['amount_usd'].sum()
-        print(f"{period_name:<12} {withdrawal_count:>10,} ${withdrawal_amount:>18,.0f}")
-
-    print("\n💱 NET FLOW:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Net Count':>10} {'Net Amount':>20}")
-    print("-" * 50)
-
-    for period_name, period_data in timeframes.items():
-        deposits = period_data[period_data['type'] == 'deposit']
-        withdrawals = period_data[period_data['type'] == 'withdrawal']
-        net_count = len(deposits) - len(withdrawals)
-        net_amount = deposits['amount_usd'].sum() - withdrawals['amount_usd'].sum()
-
-        # Add + sign for positive values
-        count_sign = "+" if net_count > 0 else ""
-        amount_sign = "+" if net_amount > 0 else ""
-
-        print(f"{period_name:<12} {count_sign}{net_count:>9,} {amount_sign}${abs(net_amount):>17,.0f}")
-
-    # Top tokens
-    print("\n🪙 TOP TOKENS BY VOLUME:")
-    print("-" * 50)
-    top_tokens = metrics['summary_by_token'].head(5)[['token', 'total_volume', 'volume_share_pct', 'net_volume']]
-    for _, row in top_tokens.iterrows():
-        print(f"  {row['token']:<8} ${row['total_volume']:>12,.0f} ({row['volume_share_pct']:>5.1f}%) | Net: ${row['net_volume']:>12,.0f}")
-
-    # User metrics
-    print("\n👥 USER ACTIVITY:")
-    print("-" * 50)
-    print(f"  24h Active Users:    {summary['unique_users_24h']:>8.0f}")
-    print(f"  7d Active Users:     {summary['unique_users_7d']:>8.0f}")
-    print(f"  30d Active Users:    {summary['unique_users_30d']:>8.0f}")
-    print(f"  All-time Users:      {summary['total_unique_users_all_time']:>8.0f}")
-
-    # Health indicators
-    health = metrics['health_metrics'].iloc[0]
-    print(f"\n🏥 HEALTH STATUS: {health['risk_level']} (Score: {health['risk_score']}/6)")
-    print("-" * 50)
-    print(f"  Volatility (30d):           {health['tvl_volatility_30d']:>6.1f}%")
-    print(f"  Max Drawdown (30d):         {health['max_drawdown_30d']:>6.1f}%")
-    print(f"  Consecutive Outflow Days:   {health['consecutive_outflow_days']:>6.0f}")
-    print(f"  Whale Concentration:        {health['whale_concentration_pct']:>6.1f}%")
-    print(f"  Outflow Ratio (7d):         {health['outflow_ratio_7d']:>6.2f}")
-
-def capture_output(func, *args, **kwargs):
-    """Capture stdout from a function and return as string"""
-    old_stdout = sys.stdout
-    sys.stdout = captured_output = StringIO()
-    try:
-        func(*args, **kwargs)
-        return captured_output.getvalue()
-    finally:
-        sys.stdout = old_stdout
-
-def export_to_markdown(content: str, filename: str, title: str):
-    """Export content to markdown file with header"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    with open(filename, 'w') as f:
-        f.write(f"# {title}\n\n")
-        f.write(f"*Generated on {timestamp}*\n\n")
-        f.write("```\n")
-        f.write(content)
-        f.write("\n```\n")
-
-def create_linear_document(title: str, content: str, team_id: str = None):
-    """Create a Linear document from markdown content"""
-    if not LINEAR_AVAILABLE:
-        print("❌ Linear API not available. Skipping Linear document creation.")
-        return None
-
-    try:
-        # Get API key from environment
-        api_key = os.getenv('LINEAR_API_KEY')
-        if not api_key:
-            print("❌ LINEAR_API_KEY environment variable not set.")
-            return None
-
-        # Initialize Linear client
-        client = LinearClient(api_key=api_key)
-
-        # Get current user and default team if not specified
-        if not team_id:
-            me = client.users.get_me()
-            teams = client.teams.list()
-            if teams:
-                team_id = teams[0].id
-                print(f"📝 Using default team: {teams[0].name}")
-            else:
-                print("❌ No teams found for Linear document creation.")
-                return None
-
-        # Create issue (Linear doesn't have direct document creation, so we use issues)
-        # The content will be in the description
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        issue_title = f"Daily Report: {title} - {timestamp}"
-
-        issue_data = {
-            "title": issue_title,
-            "description": content,
-            "teamId": team_id,
-            "priority": 2,  # Medium priority
-            "labels": ["daily-report", "automated"]
+class LinearAPIClient:
+    """Client for interacting with Linear GraphQL API."""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.linear.app/graphql"
+        self.headers = {
+            "Authorization": api_key,
+            "Content-Type": "application/json"
         }
 
-        # Create the issue
-        new_issue = client.issues.create(issue_data)
-        print(f"✅ Created Linear issue: {new_issue.identifier} - {issue_title}")
-
-        return new_issue
-
-    except Exception as e:
-        print(f"❌ Error creating Linear document: {str(e)}")
-        return None
-
-def create_all_linear_documents(reports_data: Dict[str, str]):
-    """Create Linear documents for all generated reports"""
-    if not LINEAR_AVAILABLE:
-        return
-
-    print("\n📝 Creating Linear documents...")
-
-    for report_name, data in reports_data.items():
-        title = data['title']
-        content = data['content']
-
-        linear_content = f"# {title}\n\n{content}"
-        result = create_linear_document(title, linear_content)
-
-        if result:
-            print(f"✅ {report_name} report added to Linear")
-        else:
-            print(f"❌ Failed to create Linear document for {report_name}")
-
-    print("📝 Linear document creation completed")
-
-def display_musd_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of MUSD metrics"""
-
-    print("\n" + "="*60)
-    print("💰 MUSD METRICS SUMMARY")
-    print("="*60)
-
-    current_date = df['date'].max() if 'date' in df.columns else datetime.now().date()
-
-    # Define timeframes
-    timeframes = {
-        '24h': df[df['date'] == current_date] if 'date' in df.columns else df.tail(1),
-        '7d': df[df['date'] >= current_date - timedelta(days=7)] if 'date' in df.columns else df.tail(7),
-        '30d': df[df['date'] >= current_date - timedelta(days=30)] if 'date' in df.columns else df.tail(30),
-        'All-time': df
-    }
-
-    # MUSD supply metrics
-    if 'total_supply' in df.columns:
-        current_supply = df['total_supply'].iloc[-1] if len(df) > 0 else 0
-        print(f"\n💵 Total MUSD Supply: {current_supply:,.0f}")
-
-        # Supply changes
-        print("\n📈 SUPPLY CHANGES:")
-        print("-" * 50)
-        print(f"{'Period':<12} {'Supply Change':>20}")
-        print("-" * 50)
-
-        for period_name, period_data in timeframes.items():
-            if len(period_data) > 1:
-                supply_change = period_data['total_supply'].iloc[-1] - period_data['total_supply'].iloc[0]
-                sign = "+" if supply_change > 0 else ""
-                print(f"{period_name:<12} {sign}{supply_change:>18,.0f}")
-
-    # Transaction metrics
-    if 'transaction_count' in df.columns:
-        print("\n📊 TRANSACTION ACTIVITY:")
-        print("-" * 50)
-        print(f"{'Period':<12} {'Transactions':>15}")
-        print("-" * 50)
-
-        for period_name, period_data in timeframes.items():
-            tx_count = period_data['transaction_count'].sum() if len(period_data) > 0 else 0
-            print(f"{period_name:<12} {tx_count:>15,}")
-
-    # Top holders if available
-    if 'summary_by_holder' in metrics:
-        print("\n🏦 TOP HOLDERS:")
-        print("-" * 50)
-        top_holders = metrics['summary_by_holder'].head(5)
-        for _, row in top_holders.iterrows():
-            if 'balance' in row and 'address' in row:
-                print(f"  {row['address'][:10]}... {row['balance']:>15,.0f} MUSD")
-
-def display_market_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of market data metrics"""
-
-    print("\n" + "="*60)
-    print("📈 MARKET DATA SUMMARY")
-    print("="*60)
-
-    current_date = df['date'].max() if 'date' in df.columns else datetime.now().date()
-
-    # Price metrics
-    if 'price_usd' in df.columns:
-        current_price = df['price_usd'].iloc[-1] if len(df) > 0 else 0
-        print(f"\n💲 Current Price: ${current_price:,.4f}")
-
-        # Price changes
-        if len(df) >= 7:
-            price_7d_ago = df['price_usd'].iloc[-7]
-            price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
-            print(f"📊 7d Change: {price_change_7d:+.2f}%")
-
-        if len(df) >= 30:
-            price_30d_ago = df['price_usd'].iloc[-30]
-            price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
-            print(f"📊 30d Change: {price_change_30d:+.2f}%")
-
-    # Volume metrics
-    if 'volume_24h' in df.columns:
-        print("\n📊 TRADING VOLUME:")
-        print("-" * 50)
-
-        timeframes = {
-            '24h': df.tail(1),
-            '7d': df.tail(7),
-            '30d': df.tail(30),
+    def execute_query(self, query: str, variables: dict = None):
+        """Execute a GraphQL query against Linear API."""
+        payload = {
+            "query": query,
+            "variables": variables or {}
         }
-
-        for period_name, period_data in timeframes.items():
-            volume = period_data['volume_24h'].sum() if len(period_data) > 0 else 0
-            print(f"{period_name:<12} ${volume:>18,.0f}")
-
-    # Market cap if available
-    if 'market_cap' in df.columns:
-        current_mcap = df['market_cap'].iloc[-1] if len(df) > 0 else 0
-        print(f"\n🏛️ Market Cap: ${current_mcap:,.0f}")
-
-def display_pools_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of pools metrics"""
-
-    print("\n" + "="*60)
-    print("🏊 POOLS METRICS SUMMARY")
-    print("="*60)
-
-    # TVL metrics
-    if 'tvl_usd' in df.columns:
-        current_tvl = df['tvl_usd'].sum() if len(df) > 0 else 0
-        print(f"\n💰 Total TVL: ${current_tvl:,.0f}")
-
-    # Pool count
-    if 'pool_address' in df.columns:
-        unique_pools = df['pool_address'].nunique()
-        print(f"🏊 Active Pools: {unique_pools:,}")
-
-    # Top pools by TVL
-    if 'summary_by_pool' in metrics:
-        print("\n🏆 TOP POOLS BY TVL:")
-        print("-" * 50)
-        top_pools = metrics['summary_by_pool'].head(5)
-        for _, row in top_pools.iterrows():
-            if 'tvl_usd' in row and 'pool_name' in row:
-                print(f"  {row['pool_name']:<20} ${row['tvl_usd']:>15,.0f}")
-
-    # Volume metrics
-    if 'volume_24h' in df.columns:
-        total_volume_24h = df['volume_24h'].sum() if len(df) > 0 else 0
-        print(f"\n📊 24h Volume: ${total_volume_24h:,.0f}")
-
-def display_swaps_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of swaps metrics"""
-
-    print("\n" + "="*60)
-    print("🔄 SWAPS METRICS SUMMARY")
-    print("="*60)
-
-    current_date = df['date'].max() if 'date' in df.columns else datetime.now().date()
-
-    # Define timeframes
-    timeframes = {
-        '24h': df[df['date'] == current_date] if 'date' in df.columns else df.tail(1),
-        '7d': df[df['date'] >= current_date - timedelta(days=7)] if 'date' in df.columns else df.tail(7),
-        '30d': df[df['date'] >= current_date - timedelta(days=30)] if 'date' in df.columns else df.tail(30),
-        'All-time': df
-    }
-
-    # Swap volume metrics
-    print("\n💱 SWAP VOLUME:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Count':>10} {'Volume (USD)':>20}")
-    print("-" * 50)
-
-    for period_name, period_data in timeframes.items():
-        swap_count = len(period_data)
-        swap_volume = period_data['amount_usd'].sum() if 'amount_usd' in period_data.columns and len(period_data) > 0 else 0
-        print(f"{period_name:<12} {swap_count:>10,} ${swap_volume:>18,.0f}")
-
-    # Top token pairs
-    if 'summary_by_pair' in metrics:
-        print("\n🔄 TOP TRADING PAIRS:")
-        print("-" * 50)
-        top_pairs = metrics['summary_by_pair'].head(5)
-        for _, row in top_pairs.iterrows():
-            if 'pair' in row and 'volume_usd' in row:
-                print(f"  {row['pair']:<20} ${row['volume_usd']:>15,.0f}")
-
-    # Unique users
-    if 'user_address' in df.columns:
-        unique_users = df['user_address'].nunique()
-        print(f"\n👥 Unique Swappers: {unique_users:,}")
-
-def display_vaults_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
-    """Display formatted summary of vaults metrics"""
-
-    print("\n" + "="*60)
-    print("🏦 VAULTS METRICS SUMMARY")
-    print("="*60)
-
-    # Total value locked
-    if 'tvl_usd' in df.columns:
-        current_tvl = df['tvl_usd'].sum() if len(df) > 0 else 0
-        print(f"\n💰 Total TVL: ${current_tvl:,.0f}")
-
-    # Vault count
-    if 'vault_address' in df.columns:
-        unique_vaults = df['vault_address'].nunique()
-        print(f"🏦 Active Vaults: {unique_vaults:,}")
-
-    # Top vaults by TVL
-    if 'summary_by_vault' in metrics:
-        print("\n🏆 TOP VAULTS BY TVL:")
-        print("-" * 50)
-        top_vaults = metrics['summary_by_vault'].head(5)
-        for _, row in top_vaults.iterrows():
-            if 'tvl_usd' in row and 'vault_name' in row:
-                print(f"  {row['vault_name']:<20} ${row['tvl_usd']:>15,.0f}")
-
-    # Yield metrics
-    if 'apy' in df.columns:
-        avg_apy = df['apy'].mean() if len(df) > 0 else 0
-        print(f"\n📈 Average APY: {avg_apy:.2f}%")
-
-    # Deposit/withdrawal activity
-    if 'deposits_24h' in df.columns and 'withdrawals_24h' in df.columns:
-        total_deposits = df['deposits_24h'].sum() if len(df) > 0 else 0
-        total_withdrawals = df['withdrawals_24h'].sum() if len(df) > 0 else 0
-        net_flow = total_deposits - total_withdrawals
-
-        print(f"\n💰 24h Activity:")
-        print(f"  Deposits: ${total_deposits:,.0f}")
-        print(f"  Withdrawals: ${total_withdrawals:,.0f}")
-        print(f"  Net Flow: ${net_flow:+,.0f}")
-
-def generate_all_summaries():
-    """Generate summary reports for all data processing scripts"""
-
-    print("🚀 Generating summary reports for all data sources...")
-
-    # This is a template - in practice, you would import the actual data
-    # and metrics from each processing script
-
-    # Example data structures (replace with actual data loading)
-    empty_df = pd.DataFrame()
-    empty_metrics = {}
-
-    reports = {
-        'bridge': {
-            'function': display_bridge_summary,
-            'title': 'Bridge Data Summary',
-            'filename': f'bridge_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        },
-        'musd': {
-            'function': display_musd_summary,
-            'title': 'MUSD Data Summary',
-            'filename': f'musd_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        },
-        'market': {
-            'function': display_market_summary,
-            'title': 'Market Data Summary',
-            'filename': f'market_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        },
-        'pools': {
-            'function': display_pools_summary,
-            'title': 'Pools Data Summary',
-            'filename': f'pools_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        },
-        'swaps': {
-            'function': display_swaps_summary,
-            'title': 'Swaps Data Summary',
-            'filename': f'swaps_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        },
-        'vaults': {
-            'function': display_vaults_summary,
-            'title': 'Vaults Data Summary',
-            'filename': f'vaults_summary_{datetime.now().strftime("%Y%m%d")}.md'
-        }
-    }
-
-    # Store report data for Linear integration
-    reports_data = {}
-
-    for report_name, config in reports.items():
-        try:
-            print(f"\n📊 Generating {report_name} summary...")
-
-            # Capture the output
-            content = capture_output(config['function'], empty_metrics, empty_df)
-
-            # Export to markdown
-            export_to_markdown(content, config['filename'], config['title'])
-
-            # Store for Linear integration
-            reports_data[report_name] = {
-                'title': config['title'],
-                'content': content,
-                'filename': config['filename']
+        
+        response = requests.post(
+            self.base_url,
+            headers=self.headers,
+            json=payload
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Linear API error: {response.status_code} - {response.text}")
+        
+        data = response.json()
+        if "errors" in data:
+            raise Exception(f"GraphQL errors: {data['errors']}")
+        
+        return data.get("data", {})
+    
+    def create_document(self, title: str, content: str, project_id: Optional[str] = None):
+        """Create a new document in Linear."""
+        query = """
+        mutation CreateDocument($title: String!, $content: String!, $projectId: String) {
+            documentCreate(input: { title: $title, content: $content, projectId: $projectId }) {
+                success
+                document {
+                    id
+                    title
+                    url
+                }
             }
+        }
+        """
+        
+        variables = {
+            "title": title,
+            "content": content,
+            "projectId": project_id
+        }
+        
+        result = self.execute_query(query, variables)
+        doc_data = result.get("documentCreate", {})
+        
+        if not doc_data.get("success"):
+            raise Exception("Failed to create Linear document")
+        
+        return doc_data.get("document", {})
+    
+    def update_document(self, document_id: str, title: str = None, content: str = None):
+        """Update an existing Linear document."""
+        query = """
+        mutation UpdateDocument($id: String!, $title: String, $content: String) {
+            documentUpdate(id: $id, input: { title: $title, content: $content }) {
+                success
+                document {
+                    id
+                    title
+                    url
+                    updatedAt
+                }
+            }
+        }
+        """
+        
+        variables = {"id": document_id}
+        if title:
+            variables["title"] = title
+        if content:
+            variables["content"] = content
+        
+        result = self.execute_query(query, variables)
+        return result.get("documentUpdate", {})
+    
+    def get_document(self, document_id: str):
+        """Get a document by ID."""
+        query = """
+        query GetDocument($id: String!) {
+            document(id: $id) {
+                id
+                title
+                content
+                url
+                createdAt
+                updatedAt
+            }
+        }
+        """
+        
+        result = self.execute_query(query, {"id": document_id})
+        return result.get("document", {})
 
-            print(f"✅ {config['filename']} generated successfully")
+# ==================================================
+# REPORT GENERATORS
+# ==================================================
 
+class ReportGenerator:
+    """Generate markdown reports from processing script outputs."""
+    
+    @staticmethod
+    def format_number(value: float, decimals: int = 2):
+        """Format number with commas and decimals."""
+        if pd.isna(value) or value is None:
+            return "N/A"
+        if value >= 1_000_000:
+            return f"${value/1_000_000:,.{decimals}f}M"
+        elif value >= 1_000:
+            return f"${value/1_000:,.{decimals}f}K"
+        else:
+            return f"${value:,.{decimals}f}"
+    
+    @staticmethod
+    def format_percentage(value: float, decimals: int = 2):
+        """Format percentage value."""
+        if pd.isna(value) or value is None:
+            return "N/A"
+        return f"{value:.{decimals}f}%"
+    
+    def generate_pools_report(self, pools_data: Dict[str, Any]):
+        """Generate markdown report for pools data."""
+        
+        # Extract data from pools processing
+        tvl_snapshot = pools_data.get('tvl_snapshot')
+        efficiency_metrics = pools_data.get('efficiency_metrics')
+        total_tvl = pools_data.get('total_tvl', 0)
+        active_pools = pools_data.get('active_pools', 0)
+        
+        # Get latest daily metrics if available
+        daily_pool_tvl = pools_data.get('daily_pool_tvl')
+        daily_protocol_tvl = pools_data.get('daily_protocol_tvl')
+        
+        # Calculate 7-day metrics
+        seven_day_tvl_change = 0
+        seven_day_volume = 0
+        if daily_protocol_tvl is not None and len(daily_protocol_tvl) > 7:
+            current_tvl = daily_protocol_tvl.iloc[-1]['protocol_tvl_total']
+            week_ago_tvl = daily_protocol_tvl.iloc[-8]['protocol_tvl_total']
+            if week_ago_tvl > 0:
+                seven_day_tvl_change = ((current_tvl - week_ago_tvl) / week_ago_tvl) * 100
+        
+        # Build markdown report
+        report = f"""# 🏊 Liquidity Pools Analytics Report
+*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}*
+
+---
+
+## 📊 Executive Summary
+
+### Key Metrics
+| Metric | Value | 7D Change |
+|--------|-------|-----------|
+| **Total TVL** | {self.format_number(total_tvl)} | {self.format_percentage(seven_day_tvl_change)} |
+| **Active Pools** | {active_pools} | - |
+| **Avg Pool Efficiency** | {self.format_percentage(efficiency_metrics['efficiency_score'].mean() if efficiency_metrics is not None else 0)} | - |
+
+---
+
+## 💰 Pool Performance Breakdown
+
+### TVL by Pool
+"""
+        
+        # Add pool TVL table
+        if tvl_snapshot is not None and len(tvl_snapshot) > 0:
+            report += """
+| Pool | Current TVL | Token 0 | Token 1 | Transactions | Users |
+|------|-------------|---------|---------|--------------|-------|
+"""
+            for _, row in tvl_snapshot.iterrows():
+                if row['current_tvl_total'] > 0:
+                    report += f"| **{row['pool']}** | {self.format_number(row['current_tvl_total'])} | {row['token0']} | {row['token1']} | {row['total_transactions']:,} | {row['unique_users']:,} |\n"
+        
+        # Add efficiency metrics
+        report += """
+
+### 🏆 Pool Efficiency Rankings
+"""
+        
+        if efficiency_metrics is not None and len(efficiency_metrics) > 0:
+            report += """
+| Rank | Pool | Efficiency Score | Volume/TVL Ratio | Fee APR |
+|------|------|------------------|------------------|---------|
+"""
+            efficiency_sorted = efficiency_metrics.sort_values('efficiency_score', ascending=False)
+            for idx, (_, row) in enumerate(efficiency_sorted.head(5).iterrows(), 1):
+                report += f"| {idx} | **{row['pool']}** | {row['efficiency_score']:.1f}/100 | {row['volume_tvl_ratio']:.3f} | {self.format_percentage(row['fee_apr'])} |\n"
+        
+        # Add trends section
+        report += """
+
+---
+
+## 📈 Historical Trends
+
+### 7-Day Highlights
+"""
+        
+        if daily_protocol_tvl is not None and len(daily_protocol_tvl) > 0:
+            recent_data = daily_protocol_tvl.tail(7)
+            
+            report += f"""
+- **Peak TVL:** {self.format_number(recent_data['protocol_tvl_total'].max())}
+- **Average Daily Volume:** {self.format_number(recent_data['protocol_daily_deposits'].mean() + recent_data['protocol_daily_withdrawals'].mean())}
+- **Net Flow (7D):** {self.format_number(recent_data['protocol_daily_net_flow'].sum())}
+- **Active Users (7D):** {int(recent_data['protocol_unique_users'].sum()):,}
+
+### Daily TVL Trend (Last 7 Days)
+"""
+            report += """
+| Date | TVL | Daily Change | Deposits | Withdrawals | Net Flow |
+|------|-----|--------------|----------|-------------|----------|
+"""
+            for _, row in recent_data.iterrows():
+                date_str = row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])
+                report += f"| {date_str} | {self.format_number(row['protocol_tvl_total'])} | {self.format_percentage(row.get('protocol_tvl_change_pct', 0))} | {self.format_number(row['protocol_daily_deposits'])} | {self.format_number(row['protocol_daily_withdrawals'])} | {self.format_number(row['protocol_daily_net_flow'])} |\n"
+        
+        # Add pool-specific insights
+        report += """
+
+---
+
+## 💡 Key Insights
+
+### Top Performers
+"""
+        
+        if efficiency_metrics is not None and len(efficiency_metrics) > 0:
+            best_pool = efficiency_metrics.loc[efficiency_metrics['efficiency_score'].idxmax()]
+            highest_apr_pool = efficiency_metrics.loc[efficiency_metrics['fee_apr'].idxmax()]
+            
+            report += f"""
+1. **Best Overall Pool:** {best_pool['pool']} (Score: {best_pool['efficiency_score']:.1f}/100)
+2. **Highest Fee APR:** {highest_apr_pool['pool']} ({self.format_percentage(highest_apr_pool['fee_apr'])})
+3. **Most Capital Efficient:** {efficiency_metrics.loc[efficiency_metrics['capital_efficiency'].idxmax()]['pool']}
+"""
+        
+        # Add risk indicators
+        if tvl_snapshot is not None and len(tvl_snapshot) > 0:
+            total_tvl = tvl_snapshot['current_tvl_total'].sum()
+            if total_tvl > 0:
+                concentration = tvl_snapshot.nlargest(1, 'current_tvl_total')['current_tvl_total'].sum() / total_tvl * 100
+                
+                report += f"""
+
+### ⚠️ Risk Indicators
+- **TVL Concentration (Top Pool):** {self.format_percentage(concentration)}
+- **Pools with TVL < $100k:** {len(tvl_snapshot[tvl_snapshot['current_tvl_total'] < 100000])}
+"""
+        
+        report += """
+
+---
+
+## 📝 Notes
+- Data sourced from Mezo protocol subgraphs (Goldsky)
+- TVL calculations based on cumulative deposits minus withdrawals
+- Efficiency scores factor in capital efficiency, volume/TVL ratio, and fee generation
+- All values in USD
+
+---
+*This report is automatically generated. For questions, contact the data team.*
+"""
+        
+        return report
+    
+    def generate_summary_report(self, all_metrics: Dict[str, Any]):
+        """Generate a combined summary report for all protocols."""
+        
+        report = f"""# 📊 Mezo Protocol Analytics - Daily Summary
+*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}*
+
+---
+
+## 🎯 Protocol Overview
+
+"""
+        
+        # Add pools section if data exists
+        if 'pools' in all_metrics:
+            pools_data = all_metrics['pools']
+            report += f"""
+### 🏊 Liquidity Pools
+- **Total TVL:** {self.format_number(pools_data.get('total_tvl', 0))}
+- **Active Pools:** {pools_data.get('active_pools', 0)}
+- **24h Volume:** {self.format_number(0)}  # Add when volume data available
+"""
+        
+        # Placeholder for future protocol sections
+        report += """
+
+### 🌉 Bridge (Coming Soon)
+- Data pipeline in development
+
+### 💰 MUSD Lending (Coming Soon)
+- Data pipeline in development
+
+### 🏦 Vaults (Coming Soon)
+- Data pipeline in development
+
+---
+
+*Full protocol coverage coming soon. Individual protocol reports available separately.*
+"""
+        
+        return report
+
+# ==================================================
+# MAIN EXECUTION
+# ==================================================
+
+def main():
+    """Main function to generate and upload reports."""
+    
+    print("=" * 60)
+    print("📊 MEZO ANALYTICS - REPORT GENERATION")
+    print("=" * 60)
+    
+    try:
+        # Load environment variables
+        load_dotenv(dotenv_path='../.env', override=True)
+        
+        # Initialize Linear client
+        linear_api_key = os.getenv('LINEAR_API_KEY')
+        if not linear_api_key:
+            raise ValueError("LINEAR_API_KEY not found in environment variables")
+        
+        linear = LinearAPIClient(linear_api_key)
+        print("✅ Linear API client initialized")
+        
+        # Initialize report generator
+        generator = ReportGenerator()
+        
+        # Dictionary to store all metrics
+        all_metrics = {}
+        
+        # ==================================================
+        # PROCESS POOLS DATA
+        # ==================================================
+        
+        print("\n" + "=" * 60)
+        print("Processing pools data...")
+        print("=" * 60)
+        
+        try:
+            # Run the pools processing script
+            pools_results = process_pools()
+            
+            if pools_results:
+                all_metrics['pools'] = pools_results
+                print(f"✅ Pools data processed successfully")
+                print(f"   - Total TVL: ${pools_results.get('total_tvl', 0):,.2f}")
+                print(f"   - Active Pools: {pools_results.get('active_pools', 0)}")
+                
+                # Generate pools report
+                pools_report = generator.generate_pools_report(pools_results)
+                
+                # Upload to Linear
+                doc_title = f"Pools Analytics Report - {datetime.now().strftime('%Y-%m-%d')}"
+                
+                # Check if we should update existing doc or create new
+                existing_doc_id = LINEAR_DOC_ID
+                
+                if existing_doc_id:
+                    # Update existing document
+                    result = linear.update_document(
+                        document_id=existing_doc_id,
+                        content=pools_report,
+                        title=doc_title
+                    )
+                    print(f"✅ Updated Linear document: {result.get('document', {}).get('url')}")
+                else:
+                    # Create new document
+                    project_id = LINEAR_PROJECT_ID
+                    doc = linear.create_document(
+                        title=doc_title,
+                        content=pools_report,
+                        project_id=project_id
+                    )
+                    print(f"✅ Created Linear document: {doc.get('url')}")
+                    print(f"   Document ID: {doc.get('id')}")
+                    print(f"   (Add LINEAR_DOC_ID={doc.get('id')} to .env to update this doc next time)")
+                
+                # Save report locally as backup
+                with open(f"reports/pools_report_{datetime.now().strftime('%Y%m%d')}.md", "w") as f:
+                    f.write(pools_report)
+                print("✅ Report saved locally to reports/ directory")
+                
+            else:
+                print("⚠️ No pools data returned from processing script")
+                
         except Exception as e:
-            print(f"❌ Error generating {report_name} summary: {str(e)}")
+            print(f"❌ Error processing pools data: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # ==================================================
+        # GENERATE SUMMARY REPORT
+        # ==================================================
+        
+        print("\n" + "=" * 60)
+        print("Generating summary report...")
+        print("=" * 60)
+        
+        summary_report = generator.generate_summary_report(all_metrics)
+        
+        # Upload summary to Linear
+        summary_title = f"Protocol Summary - {datetime.now().strftime('%Y-%m-%d')}"
+        existing_summary_id = LINEAR_SUMMARY_DOC_ID
+        
+        if existing_summary_id:
+            result = linear.update_document(
+                document_id=existing_summary_id,
+                content=summary_report,
+                title=summary_title
+            )
+            print(f"✅ Updated summary document: {result.get('document', {}).get('url')}")
+        else:
+            project_id = LINEAR_PROJECT_ID
+            doc = linear.create_document(
+                title=summary_title,
+                content=summary_report,
+                project_id=project_id
+            )
+            print(f"✅ Created summary document: {doc.get('url')}")
+            print(f"   Document ID: {doc.get('id')}")
+        
+        # Save summary locally
+        with open(f"reports/summary_report_{datetime.now().strftime('%Y%m%d')}.md", "w") as f:
+            f.write(summary_report)
+        
+        print("\n" + "=" * 60)
+        print("✅ REPORT GENERATION COMPLETE")
+        print("=" * 60)
+        
+        return all_metrics
+        
+    except Exception as e:
+        print(f"\n❌ Critical error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
-    # Create Linear documents if enabled
-    if LINEAR_AVAILABLE and reports_data:
-        create_all_linear_documents(reports_data)
-
-    return reports_data
 
 if __name__ == "__main__":
-    generate_all_summaries()
+    results = main()
