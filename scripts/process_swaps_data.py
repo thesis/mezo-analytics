@@ -369,15 +369,65 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(pool_metrics.head()[['pool', 'total_volume', 'swap_count']].to_string(index=False))
         print(f"\n{'─' * 60}\n")
 
-        ProgressIndicators.print_header("🚀 SWAPS PROCESSING COMPLETED SUCCESSFULLY 🚀")
+        # recalculate summary statistics to ensure they're in the results
+        total_swaps = summary_metrics['total_swaps'].iloc[0]
+        total_users = summary_metrics['users'].iloc[0]
+        total_volume_usd = summary_metrics['total_volume'].iloc[0]
+        total_fees = summary_metrics['total_fees'].iloc[0]
+        avg_swap_size_usd = summary_metrics['avg_swap_size'].iloc[0]
         
-        return {
-            'swaps_final': swaps_final,
-            'pool_metrics': pool_metrics,
-            'daily_metrics': daily_metrics,
-            'summary_metrics': summary_metrics
+        # calculate 7-day metrics
+        seven_day_volume = 0
+        seven_day_swaps = 0
+        seven_day_users = 0
+        seven_day_fees = 0
+        
+        if len(daily_metrics) > 0:
+            recent_swaps = daily_metrics.tail(7)
+            seven_day_volume = recent_swaps['daily_volume'].sum()
+            seven_day_swaps = recent_swaps['swap_count'].sum()
+            seven_day_users = recent_swaps['users'].sum()
+            seven_day_fees = recent_swaps['daily_fees'].sum()
+        
+        # get top pools by volume
+        top_pools = []
+        if pool_metrics is not None and len(pool_metrics) > 0:
+            top_pools = pool_metrics[[
+                'pool', 'total_volume_usd', 'swap_count', 'users', 'avg_swap_size'
+            ]].to_dict('records')
+        
+        # create comprehensive metrics dictionary
+        metrics_results = {
+            'daily_swaps': daily_metrics,
+            'daily_swaps_by_pool': pool_daily_metrics,
+            'pool_summary': pool_metrics,
+            'total_swaps': total_swaps,
+            'total_users': total_users,
+            'total_volume_usd': total_volume_usd,
+            'total_fees': total_fees,
+            'avg_swap_size_usd': avg_swap_size_usd,
+            'seven_day_volume': seven_day_volume,
+            'seven_day_fees': seven_day_fees,
+            'seven_day_swaps': seven_day_swaps,
+            'seven_day_users': seven_day_users,
+            'top_pools': top_pools
         }
         
+        # save metrics snapshot for report generation
+        save_metrics_snapshot(metrics_results, 'swaps')
+        
+        ProgressIndicators.print_summary_box(
+            f"🔄 SWAPS SUMMARY STATISTICS 🔄",
+            {
+                "Total Swaps": total_swaps,
+                "Unique Users": total_users,
+                "Total Volume (USD)": f"${total_volume_usd:,.2f}"            }
+        )
+
+        ProgressIndicators.print_header("🚀 SWAPS PROCESSING COMPLETED SUCCESSFULLY 🚀")
+        
+        return metrics_results
+    
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error: {str(e)}", "error")
         ProgressIndicators.print_header("❌ PROCESSING FAILED")
@@ -388,73 +438,10 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 50}")
         raise
 
-################################################
-# TEST HELPERS
-################################################
-
-def quick_test(sample_size=1000):
-    """
-    Quick test function for development.
-    Uses local CSV, samples 1000 rows, skips BigQuery.
-    
-    Usage:
-        from scripts.process_swaps_data import quick_test
-        results = quick_test()
-        results['pool_metrics']
-    """
-    return main(test_mode=True, sample_size=sample_size, skip_bigquery=True)
-
-
-def inspect_data(results, show_head=5):
-    """
-    Helper function to inspect all output dataframes.
-    
-    Usage:
-        results = quick_test()
-        inspect_data(results)
-    """
-    print(f"\n{'═' * 80}")
-    print(f"{'DATA INSPECTION':^80}")
-    print(f"{'═' * 80}\n")
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            print(f"\n{name.upper()}")
-            print(f"{'─' * 80}")
-            print(f"Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
-            print(f"\nColumns: {', '.join(df.columns.tolist())}")
-            print(f"\nFirst {show_head} rows:")
-            print(df.head(show_head).to_string())
-            print(f"\nData types:")
-            print(df.dtypes)
-            print(f"\nMemory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-            print(f"\n{'─' * 80}\n")
-
-
-def save_test_outputs(results, output_dir='./test_outputs'):
-    """
-    Save all test outputs to CSV files for manual inspection.
-    
-    Usage:
-        results = quick_test()
-        save_test_outputs(results)
-    """
-    import os
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            filepath = os.path.join(output_dir, f"{name}.csv")
-            df.to_csv(filepath, index=False)
-            print(f"✓ Saved {name} to {filepath}")
-    
-    print(f"\n✅ All outputs saved to {output_dir}/")
 
 if __name__ == "__main__":
-    results = main()
+    results = main(skip_bigquery=True)
 
-    # For testing, uncomment one of these:
-    # results = quick_test(sample_size=500)
-    # inspect_data(results)
-    # save_test_outputs(results)
+    # results = tests.quick_test(main, sample_size=500)
+    # tests.inspect_data(results)
+    # tests.save_test_outputs(results)
