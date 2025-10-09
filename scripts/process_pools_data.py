@@ -680,22 +680,12 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             }
         )
         
-        # Display per-pool breakdown
         print("\n📊 Per-Pool TVL Breakdown:")
         print("-" * 50)
         for _, row in tvl_snapshot.iterrows():
             if row['current_tvl_total'] > 0:
                 print(f"  {row['pool']:<25} ${row['current_tvl_total']:>15,.2f}")
-        
-        # Display efficiency rankings
-        print("\n🏆 Pool Efficiency Rankings:")
-        print("-" * 50)
-        efficiency_sorted = efficiency_metrics.sort_values('efficiency_score', ascending=False)
-        for idx, row in efficiency_sorted.head(5).iterrows():
-            print(f"  {row['pool']:<25} Score: {row['efficiency_score']:>6.1f}/100")
 
-         # After all processing and before the final return
-        
         # Build the metrics dictionary to return
         metrics_results = {
             'tvl_snapshot': tvl_snapshot,
