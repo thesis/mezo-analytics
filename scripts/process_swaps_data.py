@@ -1,11 +1,20 @@
+import json
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+import numpy as np
 from mezo.currency_utils import format_pool_token_columns, add_usd_conversions
 from mezo.datetime_utils import format_datetimes
 from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import MUSDQueries
-from mezo.currency_config import POOL_TOKEN_PAIRS, POOLS_MAP, TOKENS_ID_MAP, MEZO_ASSET_NAMES_MAP
+from mezo.test_utils import tests
+from mezo.report_utils import save_metrics_snapshot
+from mezo.currency_config import (
+    POOL_TOKEN_PAIRS, 
+    POOLS_MAP, 
+    TOKENS_ID_MAP, 
+    MEZO_ASSET_NAMES_MAP
+)
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
 ################################################
@@ -23,15 +32,11 @@ def clean_swap_and_fee_data(raw, swap=True):
     # maps pool contract addresses to readable names
     df['pool'] = df['contractId_'].map(POOLS_MAP)
     
-    # changes from UNIX to readable dates
     df = format_datetimes(df, ['timestamp_'])
     
-    # converts token amounts from raw values to proper decimals
     df = format_pool_token_columns(df, 'contractId_', POOL_TOKEN_PAIRS)
     
-    # adds USD conversions for all token amounts with the congecko API
-
-    # make sure to remove "m" from asset names for proper conversions
+    # removes "m" prefix from asset names for proper conversions
     token_columns = ['token0', 'token1']    
     for col in token_columns:
         df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
@@ -92,9 +97,8 @@ def get_swap_volume_for_row(row):
     else:
         return max(vol0, vol1)
 
-
 @with_progress("Calculating swap metrics")
-def calculate_swap_metrics(df):
+def get_daily_swaps_by_pool(df):
     """
     Calculate key swap volume metrics:
     - total_volume: Swap volume (input side only)
@@ -109,7 +113,7 @@ def calculate_swap_metrics(df):
     return df
 
 @with_progress("Aggregating pool-level metrics")
-def aggregate_pool_metrics(df):
+def get_swaps_by_pool(df):
     """Aggregate swap data by pool"""
     pool_metrics = df.groupby('pool').agg(
         total_volume=('total_volume', 'sum'),
@@ -125,7 +129,7 @@ def aggregate_pool_metrics(df):
 
 
 @with_progress("Creating daily time series")
-def create_daily_timeseries(df):
+def get_daily_swaps(df):
     """Aggregate swap data by date for time series analysis"""
     df['date'] = pd.to_datetime(df['timestamp']).dt.date
     df = df.sort_values(['date']).reset_index(drop=True)
@@ -148,7 +152,6 @@ def create_daily_timeseries(df):
     
     return daily_metrics
 
-
 @with_progress("Creating pool-date aggregations")
 def create_swaps_daily_metrics(df):
     """Aggregate by both pool and date for detailed analysis"""
@@ -162,7 +165,6 @@ def create_swaps_daily_metrics(df):
     ).reset_index()
     
     return swaps_daily
-
 
 @with_progress("Calculating swap summary statistics")
 def create_summary_metrics(df, daily_metrics):
@@ -185,7 +187,6 @@ def create_summary_metrics(df, daily_metrics):
     
     return summary_df
 
-
 ################################################
 # MAIN PROCESSING PIPELINE
 ################################################
@@ -203,9 +204,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 60}\n")
 
     try:
-        # ============================================
-        # STEP 1: Setup
-        # ============================================
+
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.8f}'.format
@@ -217,7 +216,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             ProgressIndicators.print_step("Database clients initialized", "success")
 
         # ============================================
-        # STEP 2: Fetch Raw Data
+        # get raw data + upload to bigquery
         # ============================================
 
         if not test_mode:
@@ -226,14 +225,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                 SubgraphClient.SWAPS_SUBGRAPH, 
                 MUSDQueries.GET_SWAPS, 
                 'swaps'
-            )
-            
-            if not ExceptionHandler.validate_dataframe(
-                raw_swap_data, "Raw swap data", 
-                ['contractId_', 'timestamp_', 'to', 'amount0In', 'amount1In']
-            ):
-                raise ValueError("Invalid raw swap data structure")
-            
+            )            
             ProgressIndicators.print_step(f"Loaded {len(raw_swap_data):,} raw swap transactions", "success")
 
             ProgressIndicators.print_step("Fetching raw swap fees data from subgraph", "start")
@@ -251,10 +243,6 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             raw_swap_data = pd.read_csv('raw_swap_data.csv')
             raw_fees_data = pd.read_csv('raw_fees_data.csv')
 
-        # ============================================
-        # STEP 3: Upload Raw Data to BigQuery
-        # ============================================
-
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
 
@@ -269,14 +257,10 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                     ProgressIndicators.print_step(f"✓ Uploaded {table_name}", "success")
 
         # ============================================
-        # STEP 4: Clean and Process Data
+        # clean data + upload to bigquery
         # ============================================
         swaps_df_clean = clean_swap_and_fee_data(raw_swap_data)
         fees_df_clean = clean_swap_and_fee_data(raw_fees_data, swap=False)
-
-        # ============================================
-        # STEP 5: Upload Clean Data to BigQuery
-        # ============================================
 
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
@@ -292,7 +276,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                     ProgressIndicators.print_step(f"✓ Uploaded {table_name}", "success")
 
         # ============================================
-        # STEP 6: Merge Swaps with Fees
+        # merge swaps and fees
         # ============================================
         ProgressIndicators.print_step("Merging swaps with fees", "start")
 
@@ -322,7 +306,6 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
 
         int_swaps_with_fees = swaps_with_fees.rename(columns=col_map)
         
-        # Keep only necessary columns
         keep_cols = ['timestamp', 'pool', 'token0', 'token1', 'amount0In_usd',
        'amount1In_usd', 'amount0Out_usd', 'amount1Out_usd', 'fee0_usd', 'fee1_usd', 
        'user', 'transactionHash_']
@@ -336,21 +319,13 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         ProgressIndicators.print_step(f"Merged {len(int_swaps_with_fees):,} complete swap records", "success")
 
         # ============================================
-        # STEP 7: Calculate Swap Metrics
+        # get daily and aggregate metrics + upload to bigquery
         # ============================================
-        swaps_final = calculate_swap_metrics(int_swaps_with_fees)
-
-        # ============================================
-        # STEP 8: Create Aggregated Analytics
-        # ============================================
-        pool_metrics = aggregate_pool_metrics(swaps_final)
-        daily_metrics = create_daily_timeseries(swaps_final)
+        swaps_final = get_daily_swaps_by_pool(int_swaps_with_fees)
+        pool_metrics = get_swaps_by_pool(swaps_final)
+        daily_metrics = get_daily_swaps(swaps_final)
         pool_daily_metrics = create_swaps_daily_metrics(swaps_final)
         summary_metrics = create_summary_metrics(swaps_final, daily_metrics)
-
-        # ============================================
-        # STEP 9: Upload All Data to BigQuery
-        # ============================================
 
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading aggregated data to BigQuery", "start")
@@ -378,7 +353,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                     ProgressIndicators.print_step(f"Upserted {table_name} to BigQuery", "success")
 
         # ============================================
-        # STEP 10: Print Summary Results
+        # print summary results
         # ============================================
         ProgressIndicators.print_header("📊 SWAP ANALYTICS SUMMARY")
         
