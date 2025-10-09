@@ -10,7 +10,7 @@ def add_cumulative_columns(df, cols):
     
     # Then, add the growth columns using the updated dataframe
     df_final = df_with_cumulative.assign(**{
-        f'cumulative_{col}_growth': df_with_cumulative[f'cumulative_{col}'].pct_change()
+        f'cumulative_{col}_growth': df_with_cumulative[f'cumulative_{col}'].pct_change(periods = 7)
         for col in cols
     })
     
@@ -18,7 +18,7 @@ def add_cumulative_columns(df, cols):
     
 def add_pct_change_columns(df, cols, interval):
     return df.assign(**{
-        f'{interval}_{col}_change': df[col].pct_change()
+        f'{interval}_{col}_change': df[col].pct_change(periods = 7)
         for col in cols
     })
 

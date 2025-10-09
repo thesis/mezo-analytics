@@ -152,7 +152,7 @@ def with_progress(description: str):
             ProgressIndicators.print_step(description, "start")
             try:
                 result = func(*args, **kwargs)
-                ProgressIndicators.print_step(description, "success")
+                ProgressIndicators.print_step(f"{description} successful", "success")
                 return result
             except Exception as e:
                 ProgressIndicators.print_step(f"{description} - {str(e)}", "error")

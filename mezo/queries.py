@@ -329,10 +329,15 @@ class MUSDQueries:
   """
 
 class BridgeQueries:
-
+        
   GET_WORMHOLE_TXNS = """
-  query getWormholeTxns {
-    transferSents(first: 10, orderBy: timestamp_, orderDirection: desc) {
+  query getWormholeTxns($skip: Int!) {
+    transferSents(
+      orderBy: timestamp_, 
+      orderDirection: desc,
+      first: 1000, 
+      skip: $skip
+    ) {
       timestamp_
       refundAddress
       recipient
