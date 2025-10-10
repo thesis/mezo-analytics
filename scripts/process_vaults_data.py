@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import os
 from mezo.currency_utils import format_musd_currency_columns
 from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import add_cumulative_columns, add_rolling_values
+from mezo.data_utils import add_cumulative_columns, add_rolling_values, add_pct_change_columns
 from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import VaultQueries
 from mezo.visual_utils import ProgressIndicators
@@ -37,21 +37,22 @@ def aggregate_vaults_by_day(df):
     daily_vault_txns['daily_flow'] = daily_vault_txns['deposit_amt'] - daily_vault_txns['withdrawal_amt']
     daily_vault_txns['TVL'] = daily_vault_txns['daily_flow'].cumsum()
     daily_vault_txns = add_rolling_values(daily_vault_txns, 30, ['TVL', 'volume', 'daily_flow', 'deposit_amt', 'withdrawal_amt'])
+    daily_vault_txns = add_cumulative_columns(daily_vault_txns, ['volume', 'deposit_amt', 'withdrawal_amt', 'total_transactions', 'deposit_count', 'withdrawal_count', 'unique_users'])
 
     return daily_vault_txns
 
-def aggregate_cumulative_daily_vaults(df_daily):
-    cumul_daily_vault_txns = add_cumulative_columns(df_daily, ['deposit_amt', 'withdrawal_amt', 'total_transactions', 'deposit_count', 'withdrawal_count', 'unique_users'])
+# def aggregate_cumulative_daily_vaults(df_daily):
+#     cumul_daily_vault_txns = add_cumulative_columns(df_daily, ['deposit_amt', 'withdrawal_amt', 'total_transactions', 'deposit_count', 'withdrawal_count', 'unique_users'])
 
-    cumul_daily_vault_txns = cumul_daily_vault_txns[[
-        'timestamp_', 'TVL', 'cumulative_deposit_amt', 'cumulative_withdrawal_amt', 
-        'cumulative_total_transactions', 'cumulative_deposit_count', 
-        'cumulative_withdrawal_count', 'cumulative_unique_users', 
-        'cumulative_deposit_amt_growth', 'cumulative_withdrawal_amt_growth', 'cumulative_total_transactions_growth',
-        'cumulative_deposit_count_growth', 'cumulative_withdrawal_count_growth', 'cumulative_unique_users_growth'
-    ]]
+#     cumul_daily_vault_txns = cumul_daily_vault_txns[[
+#         'timestamp_', 'TVL', 'cumulative_deposit_amt', 'cumulative_withdrawal_amt', 
+#         'cumulative_total_transactions', 'cumulative_deposit_count', 
+#         'cumulative_withdrawal_count', 'cumulative_unique_users', 
+#         'cumulative_deposit_amt_growth', 'cumulative_withdrawal_amt_growth', 'cumulative_total_transactions_growth',
+#         'cumulative_deposit_count_growth', 'cumulative_withdrawal_count_growth', 'cumulative_unique_users_growth'
+#     ]]
 
-    return cumul_daily_vault_txns
+#     return cumul_daily_vault_txns
 
 # ========================================
 # main process

@@ -4,13 +4,13 @@ from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 
-from mezo.clients import SubgraphClient
+from mezo.clients import SubgraphClient, BigQueryClient
 from mezo.queries import BridgeQueries
-from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.currency_config import TOKEN_MAP, TOKENS_ID_MAP, TOKEN_TYPE_MAP
+from mezo.test_utils import tests
+from mezo.currency_utils import format_currency_columns, replace_token_labels
 from mezo.datetime_utils import format_datetimes
 from mezo.currency_utils import get_token_prices
-from mezo.clients import BigQueryClient
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
 # ==================================================
@@ -75,7 +75,7 @@ def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col, txn_ty
 
     return df
 
-@with_progress("Calculating growth rate...")
+@with_progress("Calculating growth rate")
 def calculate_growth_rate(series: pd.Series, days: int):
     """Calculate percentage growth over specified days"""
     if len(series) < days + 1:
@@ -86,7 +86,7 @@ def calculate_growth_rate(series: pd.Series, days: int):
         return 0
     return ((current - past) / past) * 100
 
-@with_progress("Calculating max drawdown...")
+@with_progress("Calculating max drawdown")
 def calculate_max_drawdown(series: pd.Series):
     """Calculate maximum percentage drawdown"""
     if len(series) == 0:
@@ -95,7 +95,7 @@ def calculate_max_drawdown(series: pd.Series):
     drawdown = (series - running_max) / running_max * 100
     return abs(drawdown.min())
 
-@with_progress("Calculating consecutive outflow days...")
+@with_progress("Calculating consecutive outflow days")
 def calculate_consecutive_outflow_days(daily_df: pd.DataFrame):
     """Count consecutive days of net outflows"""
     if 'net_flow' not in daily_df.columns:
@@ -128,8 +128,7 @@ def calculate_bridge_metrics(combined: pd.DataFrame):
     combined['date'] = pd.to_datetime(combined['timestamp_'])
     combined['timestamp_'] = pd.to_datetime(combined['timestamp_'])
     
-    # Calculate all metrics
-    print("📊 Calculating metrics...")
+    print("📊 Calculating metrics")
     
     # Time series metrics
     daily_overall = calculate_daily_metrics_overall(combined)
@@ -634,10 +633,19 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
 # ==================================================
 # RUN MAIN PROCESS
 # ==================================================
-
-def main():
+        
+def main(skip_bigquery=False, sample_size=False, test_mode=False):
     """Main function to process bridge transaction data."""
     ProgressIndicators.print_header("BRIDGE DATA PROCESSING PIPELINE")
+
+    if test_mode:
+        print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
+        if sample_size:
+            print(f"{'Using sample size: ' + str(sample_size):^60}")
+        if skip_bigquery:
+            print(f"{'Skipping BigQuery uploads':^60}")
+        print(f"{'─' * 60}\n")
+        path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
 
     try:
         # Load environment variables
@@ -654,97 +662,106 @@ def main():
     # ==================================================
     # GET RAW BRIDGE DATA
     # ==================================================
-        
-        ProgressIndicators.print_step("Fetching raw bridge deposit data", "start")
-        raw_deposits = SubgraphClient.get_subgraph_data(
-            SubgraphClient.MEZO_BRIDGE_SUBGRAPH,
-            BridgeQueries.GET_BRIDGE_TRANSACTIONS,
-            'assetsLockeds'
-        )
-        ProgressIndicators.print_step(f"Retrieved {len(raw_deposits) if raw_deposits is not None else 0} deposit transactions", "success")
+    
+        if not test_mode:
+            ProgressIndicators.print_step("Fetching raw bridge deposit data", "start")
+            raw_deposits = SubgraphClient.get_subgraph_data(
+                SubgraphClient.MEZO_BRIDGE_SUBGRAPH,
+                BridgeQueries.GET_BRIDGE_TRANSACTIONS,
+                'assetsLockeds'
+            )
+            ProgressIndicators.print_step(f"Retrieved {len(raw_deposits) if raw_deposits is not None else 0} deposit transactions", "success")
 
-        ProgressIndicators.print_step("Fetching raw bridge withdrawal data", "start")
-        raw_withdrawals = SubgraphClient.get_subgraph_data(
-            SubgraphClient.MEZO_BRIDGE_OUT_SUBGRAPH,
-            BridgeQueries.GET_NATIVE_WITHDRAWALS,
-            'assetsUnlockeds'
-        )
-        ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
+            ProgressIndicators.print_step("Fetching raw bridge withdrawal data", "start")
+            raw_withdrawals = SubgraphClient.get_subgraph_data(
+                SubgraphClient.MEZO_BRIDGE_OUT_SUBGRAPH,
+                BridgeQueries.GET_NATIVE_WITHDRAWALS,
+                'assetsUnlockeds'
+            )
+            ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
+
+            ProgressIndicators.print_step("Saving CSVs for test mode", "start")
+            raw_deposits.to_csv(f'{path}/raw_deposits.csv')
+            raw_withdrawals.to_csv(f'{path}/raw_withdrawals.csv')
+            ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")        
         
-        # Upload raw data to BigQuery
-        ProgressIndicators.print_step("Uploading raw bridge data to BigQuery", "start")
-        
-        if raw_deposits is not None and len(raw_deposits) > 0:
-            bq.update_table(raw_deposits, 'raw_data', 'bridge_transactions_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw bridge data to BigQuery", "success")
+        else:
+            raw_deposits = pd.read_csv(f'{path}/raw_deposits.csv')
+            raw_withdrawals = pd.read_csv(f'{path}/raw_withdrawals.csv')
 
     # ==========================================================
     # UPLOAD RAW DATA TO BIGQUERY
     # ==========================================================
+        
+        if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
+            raw_datasets = [
+                (raw_deposits, 'bridge_transactions_raw', 'transactionHash_'),
+                (raw_withdrawals, 'bridge_withdrawals_raw', 'transactionHash_'),
+            ]
 
-        ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
-        raw_datasets = [
-            (raw_deposits, 'bridge_transactions_raw', 'transactionHash_'),
-            (raw_withdrawals, 'bridge_withdrawals_raw', 'transactionHash_'),
-        ]
-
-        for dataset, table_name, id_column in raw_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'raw_data', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in raw_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'raw_data', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+                    ProgressIndicators.print_step("Saving CSVs for test mode", "start")
+                    dataset.to_csv(f'{dataset}.csv')
+                    ProgressIndicators.print_step("CSVs saved", "success")
 
     # ==================================================
     # CLEAN BRIDGE DEPOSIT + WITHDRAWAL DATA
     # ==================================================
-        ProgressIndicators.print_step("Processing deposits data", "start")
-        deposits = clean_bridge_data(
-            raw=raw_deposits, sort_col='timestamp_',
-            date_cols=['timestamp_'], currency_cols=['amount'], 
-            asset_col='token', txn_type='deposit'
-        )
-        deposits_with_usd = add_usd_conversions(
-            deposits, token_column='token',
-            tokens_id_map=TOKENS_ID_MAP, amount_columns =['amount']
-        )
-        deposits_clean = deposits_with_usd[[
-            'timestamp_', 'amount', 'token', 'amount_usd',
-            'recipient', 'transactionHash_', 'type']]
-        deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
-        ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
+        if not test_mode:
+            ProgressIndicators.print_step("Processing deposits data", "start")
+            deposits = clean_bridge_data(
+                raw=raw_deposits, sort_col='timestamp_',
+                date_cols=['timestamp_'], currency_cols=['amount'], 
+                asset_col='token', txn_type='deposit'
+            )
+            deposits_with_usd = add_usd_conversions(
+                deposits, token_column='token',
+                tokens_id_map=TOKENS_ID_MAP, amount_columns =['amount']
+            )
+            deposits_clean = deposits_with_usd[[
+                'timestamp_', 'amount', 'token', 'amount_usd',
+                'recipient', 'transactionHash_', 'type']]
+            deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
+            ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
 
-        # clean withdrawals data
-        ProgressIndicators.print_step("Processing withdrawals data", "start")
-        withdrawals = clean_bridge_data(
-            raw_withdrawals, sort_col='timestamp_',
-            date_cols=['timestamp_'], currency_cols=['amount'], 
-            asset_col='token', txn_type='withdrawal'
-        )
-        withdrawals_with_usd = add_usd_conversions(
-            withdrawals, token_column='token',
-            tokens_id_map=TOKENS_ID_MAP, amount_columns=['amount']
-        )
-        bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
-        withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
-        withdrawals_clean = withdrawals_with_usd[[
-            'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
-            'recipient', 'sender', 'transactionHash_', 'type']]
-        withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
-        ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
+            # clean withdrawals data
+            ProgressIndicators.print_step("Processing withdrawals data", "start")
+            withdrawals = clean_bridge_data(
+                raw_withdrawals, sort_col='timestamp_',
+                date_cols=['timestamp_'], currency_cols=['amount'], 
+                asset_col='token', txn_type='withdrawal'
+            )
+            withdrawals_with_usd = add_usd_conversions(
+                withdrawals, token_column='token',
+                tokens_id_map=TOKENS_ID_MAP, amount_columns=['amount']
+            )
+            bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
+            withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
+            withdrawals_clean = withdrawals_with_usd[[
+                'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
+                'recipient', 'sender', 'transactionHash_', 'type']]
+            withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
+            ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
 
     # ==========================================================
     # UPLOAD CLEAN DEPOSIT + WITHDRAWAL TABLES TO BIGQUERY
     # ==========================================================
-    
-        ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
-        clean_datasets = [
-            (deposits_clean, 'bridge_deposits_clean', 'transactionHash_'),
-            (withdrawals_clean, 'bridge_withdrawals_clean', 'transactionHash_'),
-        ]
+        if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
+            clean_datasets = [
+                (deposits_clean, 'bridge_deposits_clean', 'transactionHash_'),
+                (withdrawals_clean, 'bridge_withdrawals_clean', 'transactionHash_'),
+            ]
 
-        for dataset, table_name, id_column in clean_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'staging', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in clean_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'staging', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+
 
     # ==================================================
     # ADD BRIDGE VOLUME AND BRIDGE TVL TO TABLE
@@ -849,19 +866,19 @@ def main():
         ProgressIndicators.print_step("Aggregation complete", "success")
 
     # ========================================
-    # AGGREGATE VOLUME BY DAY
+    # UPLOAD VOLUME BY DAY TO BIGQUERY
     # ========================================
+        if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading daily data to BigQuery", "start")
+            daily_datasets = [
+                (daily_tvl, 'agg_bridge_daily-tvl', 'timestamp_'),
+                (daily_volume, 'agg_bridge_daily-volume', 'timestamp_'),
+            ]
 
-        ProgressIndicators.print_step("Uploading daily data to BigQuery", "start")
-        daily_datasets = [
-            (daily_tvl, 'agg_bridge_daily-tvl', 'timestamp_'),
-            (daily_volume, 'agg_bridge_daily-volume', 'timestamp_'),
-        ]
-
-        for dataset, table_name, id_column in daily_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in daily_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'marts', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
     # ========================================
     # RUN COMPREHENSIVE BRIDGE METRICS
@@ -886,41 +903,42 @@ def main():
     # UPLOAD AGGREGATED DATA TO BIGQUERY
     # ==========================================================
         
-        # INTERMEDIATE TABLES
-        ProgressIndicators.print_step("Uploading intermediate tables to BigQuery", "start")
-        int_datasets = [
-            (user_metrics, 'int_bridge_user-metrics', 'user'),
-            (daily_by_token, 'int_bridge_daily-by-token', 'identifier')
-        ]
+        if not skip_bigquery:
+            # INTERMEDIATE TABLES
+            ProgressIndicators.print_step("Uploading intermediate tables to BigQuery", "start")
+            int_datasets = [
+                (user_metrics, 'int_bridge_user-metrics', 'user'),
+                (daily_by_token, 'int_bridge_daily-by-token', 'identifier')
+            ]
 
-        for dataset, table_name, id_column in int_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'intermediate', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in int_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'intermediate', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # MARTS TABLES
-        ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
-        marts_datasets = [
-            (daily_overall, 'marts_bridge_daily-overall', 'date'),
-            (user_metrics_by_token, 'marts_bridge_user-metrics-by-token', 'token'),
-            (summary_by_token, 'marts_bridge_summary-by-token', 'token')
-        ]
+            # MARTS TABLES
+            ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
+            marts_datasets = [
+                (daily_overall, 'marts_bridge_daily-overall', 'date'),
+                (user_metrics_by_token, 'marts_bridge_user-metrics-by-token', 'token'),
+                (summary_by_token, 'marts_bridge_summary-by-token', 'token')
+            ]
 
-        for dataset, table_name, id_column in marts_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-        
-        ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
-        upsert_datasets = [
-            (summary_overall, 'marts_bridge_summary', 'updated_on'),
-            (health_metrics, 'marts_bridge_health-metrics', 'updated_on')
-        ]
+            for dataset, table_name, id_column in marts_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'marts', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            
+            ProgressIndicators.print_step("Uploading marts tables to BigQuery", "start")
+            upsert_datasets = [
+                (summary_overall, 'marts_bridge_summary', 'updated_on'),
+                (health_metrics, 'marts_bridge_health-metrics', 'updated_on')
+            ]
 
-        for dataset, table_name, id_column in upsert_datasets:
-            if dataset is not None and len(dataset) > 0:
-                bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in upsert_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # Display summary
         display_summary(metrics, combined)

@@ -1,31 +1,31 @@
-"""
-Process liquidity pool data from Mezo pools.
-
-This script:
-1. Fetches deposit/withdrawal data from pools subgraph
-2. Fetches volume and fee data from Tigris subgraph  
-3. Calculates TVL, volume metrics, and efficiency indicators
-4. Creates daily aggregations and pool-level summaries
-5. Uploads to BigQuery (raw, staging, and marts layers)
-"""
-
 from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
-import os
 from datetime import datetime, timedelta
-from typing import Dict, Tuple
 
-from mezo.currency_utils import format_pool_token_columns, add_pool_usd_conversions, format_token_columns, add_usd_conversions
-from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import add_rolling_values, flatten_json_column
 from mezo.clients import BigQueryClient, SubgraphClient
-from mezo.currency_config import POOLS_MAP, POOL_TOKEN_PAIRS, TOKENS_ID_MAP, TIGRIS_MAP, MEZO_ASSET_NAMES_MAP
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 from mezo.queries import PoolQueries
+from mezo.currency_utils import (
+    format_pool_token_columns, 
+    add_pool_usd_conversions, 
+    format_token_columns, 
+    add_usd_conversions
+)
+from mezo.datetime_utils import format_datetimes
+from mezo.data_utils import flatten_json_column
+from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
+from mezo.report_utils import save_metrics_snapshot
+from mezo.test_utils import tests
+from mezo.currency_config import (
+    POOLS_MAP, 
+    POOL_TOKEN_PAIRS, 
+    TOKENS_ID_MAP, 
+    TIGRIS_MAP, 
+    MEZO_ASSET_NAMES_MAP
+)
 
 # ==================================================
-# HELPER FUNCTIONS
+# helper functions
 # ==================================================
 
 @with_progress("Calculating the volume for each row")
@@ -144,83 +144,6 @@ def process_fees_data(raw_fees):
     ]]
     
     return df
-
-@with_progress("Generating report")
-def save_metrics_snapshot(metrics_data: dict, script_name: str = 'pools'):
-    """
-    Save processing metrics to a JSON file for later report generation.
-    
-    Args:
-        metrics_data: Dictionary containing all metrics from the processing
-        script_name: Name of the script (used in filename)
-    """
-    import json
-    from datetime import datetime, date
-    import numpy as np
-    
-    # Create metrics directory if it doesn't exist
-    metrics_dir = 'metrics_snapshots'
-    os.makedirs(metrics_dir, exist_ok=True)
-    
-    # Convert DataFrames to dictionaries and handle data types
-    serializable_metrics = {}
-    
-    for key, value in metrics_data.items():
-        if isinstance(value, pd.DataFrame):
-            # Convert DataFrame to dict and handle special types
-            df_dict = value.to_dict('records')
-            # Convert any datetime/date objects to strings
-            for record in df_dict:
-                for k, v in record.items():
-                    if isinstance(v, (datetime, date)):
-                        record[k] = v.isoformat()
-                    elif isinstance(v, (np.integer, np.floating)):
-                        record[k] = float(v)
-                    elif isinstance(v, np.ndarray):
-                        record[k] = v.tolist()
-                    elif pd.isna(v):
-                        record[k] = None
-            serializable_metrics[key] = df_dict
-        elif isinstance(value, (np.integer, np.floating)):
-            serializable_metrics[key] = float(value)
-        elif isinstance(value, np.ndarray):
-            serializable_metrics[key] = value.tolist()
-        else:
-            serializable_metrics[key] = value
-    
-    # Add metadata
-    metadata = {
-        'generated_at': datetime.now().isoformat(),
-        'script': script_name,
-        'version': '1.0.0'
-    }
-    
-    output = {
-        'metadata': metadata,
-        'metrics': serializable_metrics
-    }
-    
-    # Save with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"{metrics_dir}/{script_name}_metrics_{timestamp}.json"
-    
-    with open(filename, 'w') as f:
-        json.dump(output, f, indent=2, default=str)
-    
-    # Also save as 'latest' for easy access
-    latest_filename = f"{metrics_dir}/{script_name}_metrics_latest.json"
-    with open(latest_filename, 'w') as f:
-        json.dump(output, f, indent=2, default=str)
-    
-    print(f"\n📁 Metrics saved to:")
-    print(f"   - {filename}")
-    print(f"   - {latest_filename}")
-    
-    return filename
-
-# ==================================================
-# TVL AND LIQUIDITY CALCULATIONS
-# ==================================================
 
 @with_progress("Calculating TVL and daily pool metrics")
 def calculate_tvl_and_daily_metrics(deposits_df, withdrawals_df):
@@ -414,10 +337,6 @@ def calculate_tvl_and_daily_metrics(deposits_df, withdrawals_df):
     
     return daily_pool_metrics, daily_pool_metrics_all, tvl_snapshot
 
-# ==================================================
-# VOLUME CALCULATIONS
-# ==================================================
-
 @with_progress("Calculating daily volume metrics")
 def calculate_volume_metrics(volume_df):
     """
@@ -515,10 +434,6 @@ def calculate_volume_metrics(volume_df):
     
     return daily_pool_volume, daily_pool_volume_all
 
-# ==================================================
-# FEE CALCULATIONS
-# ==================================================
-
 @with_progress("Calculating daily fee metrics")
 def calculate_fee_metrics(fees_df):
     """
@@ -559,10 +474,6 @@ def calculate_fee_metrics(fees_df):
     
     return daily_pool_fees.round(2), daily_pool_fees_all.round(2)
 
-# ==================================================
-# EFFICIENCY METRICS
-# ==================================================
-
 @with_progress("Calculating pool efficiency metrics")
 def calculate_efficiency_metrics(tvl_snapshot, daily_volume, daily_fees):
     """Calculate pool efficiency and performance metrics."""
@@ -600,11 +511,10 @@ def calculate_efficiency_metrics(tvl_snapshot, daily_volume, daily_fees):
     return efficiency
 
 # ==================================================
-# MAIN EXECUTION
+# main exe
 # ==================================================
 
 def main(test_mode=False, sample_size=False, skip_bigquery=False):
-    """Main function to process pool data."""
     ProgressIndicators.print_header("POOLS DATA PROCESSING PIPELINE")
 
     if test_mode:
@@ -616,138 +526,94 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 60}\n")
 
     try:
-        # Load environment variables
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.8f}'.format
         ProgressIndicators.print_step("Environment loaded successfully", "success")
         
         if not skip_bigquery:
-            # Initialize clients
             ProgressIndicators.print_step("Initializing database clients", "start")
             bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
             ProgressIndicators.print_step("Database clients initialized", "success")
 
-        # ==========================================================
-        # FETCH RAW DATA
-        # ==========================================================
-
-        # Get deposits data
-        ProgressIndicators.print_step("Fetching pool deposits data", "start")
-        deposits_data = SubgraphClient.get_subgraph_data(
-            SubgraphClient.POOLS_SUBGRAPH, 
-            PoolQueries.GET_DEPOSITS, 
-            'mints'
-        )
-        ProgressIndicators.print_step(f"Loaded {len(deposits_data)} deposit transactions", "success")
-
-        # Get withdrawals data
-        ProgressIndicators.print_step("Fetching pool withdrawals data", "start")
-        withdrawals_data = SubgraphClient.get_subgraph_data(
-            SubgraphClient.POOLS_SUBGRAPH, 
-            PoolQueries.GET_WITHDRAWALS, 
-            'burns'
-        )
-        ProgressIndicators.print_step(f"Loaded {len(withdrawals_data)} withdrawal transactions", "success")
-
-        # Get volume data
-        ProgressIndicators.print_step("Fetching pool volume data", "start")
-        volume_data = SubgraphClient.get_subgraph_data(
-            SubgraphClient.TIGRIS_POOLS_SUBGRAPH, 
-            PoolQueries.GET_POOL_VOLUME, 
-            'poolVolumes'
-        )
-        ProgressIndicators.print_step(f"Loaded {len(volume_data)} volume records", "success")
-
-        # Get fees data
-        ProgressIndicators.print_step("Fetching pool fees data", "start")
-        fees_data = SubgraphClient.get_subgraph_data(
-            SubgraphClient.TIGRIS_POOLS_SUBGRAPH, 
-            PoolQueries.GET_TOTAL_POOL_FEES, 
-            'feesStats_collection'
-        )
-        ProgressIndicators.print_step(f"Loaded {len(fees_data)} fee records", "success")
-        
-        # ==========================================================
-        # UPLOAD RAW DATA TO BIGQUERY
-        # ==========================================================
-
-        ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
-        
-        fees_data['id'] = fees_data['id'].astype('int')
-        volume_data['id'] = volume_data['id'].astype('int')
-
-        raw_datasets = [
-            (deposits_data, 'pool_deposits_raw', 'transactionHash_'),
-            (withdrawals_data, 'pool_withdrawals_raw', 'transactionHash_'),
-            (volume_data, 'pool_volume_raw', 'id'),
-            (fees_data, 'pool_fees_raw', 'id')
+    # ==========================================================
+    # fetch raw data + upload to bigquery
+    # ==========================================================
+    
+        subgraph_data = [
+            ('deposits_data', 'pool deposits', SubgraphClient.POOLS_SUBGRAPH, PoolQueries.GET_DEPOSITS, 'mints'),
+            ('withdrawals_data', 'pool withdrawals', SubgraphClient.POOLS_SUBGRAPH, PoolQueries.GET_WITHDRAWALS, 'burns'),
+            ('volume_data', 'pool volume', SubgraphClient.TIGRIS_POOLS_SUBGRAPH, PoolQueries.GET_POOL_VOLUME, 'poolVolumes'),
+            ('fees_data', 'pool fees', SubgraphClient.TIGRIS_POOLS_SUBGRAPH, PoolQueries.GET_TOTAL_POOL_FEES, 'feesStats_collection')
         ]
 
+        data_results = {}
+
+        for var_name, display_name, subgraph, query, query_name in subgraph_data:
+            ProgressIndicators.print_step(f"Fetching {display_name} data", "start")
+            data_results[var_name] = SubgraphClient.get_subgraph_data(
+                subgraph, query, query_name
+            )
+            ProgressIndicators.print_step(f"Loaded {len(data_results[var_name])} rows of {display_name}", "success")
+
+        deposits_data = data_results['deposits_data']
+        withdrawals_data = data_results['withdrawals_data']
+        volume_data = data_results['volume_data']
+        fees_data = data_results['fees_data']
+
         if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")        
+            fees_data['id'] = fees_data['id'].astype('int')
+            volume_data['id'] = volume_data['id'].astype('int')
+
+            raw_datasets = [
+                (deposits_data, 'pool_deposits_raw', 'transactionHash_'),
+                (withdrawals_data, 'pool_withdrawals_raw', 'transactionHash_'),
+                (volume_data, 'pool_volume_raw', 'id'),
+                (fees_data, 'pool_fees_raw', 'id')
+            ]
             for dataset, table_name, id_column in raw_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.update_table(dataset, 'raw_data', table_name, id_column)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # ==========================================================
-        # CLEAN DATA
-        # ==========================================================
+    # ==========================================================
+    # clean data + upload to bigquery
+    # ==========================================================
 
         deposits_clean = process_pools_data(deposits_data, 'deposit')
         withdrawals_clean = process_pools_data(withdrawals_data, 'withdrawal')
         volume_clean = process_volume_data(volume_data)
         fees_clean = process_fees_data(fees_data)
-
-        # ==========================================================
-        # UPLOAD CLEAN DATA TO BIGQUERY STAGING
-        # ==========================================================
-
-        ProgressIndicators.print_step("Uploading clean data to BigQuery staging", "start")
-        
-        volume_clean['id'] = volume_clean['id'].astype('int')
-        fees_clean['id'] = fees_clean['id'].astype('int')
-
-        clean_datasets = [
-            (deposits_clean, 'pool_deposits_clean', 'transactionHash_'),
-            (withdrawals_clean, 'pool_withdrawals_clean', 'transactionHash_'),
-            (volume_clean, 'pool_volume_clean', 'id'),
-            (fees_clean, 'pool_fees_clean', 'id')
-        ]
         
         if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading clean data to BigQuery staging", "start")
+            volume_clean['id'] = volume_clean['id'].astype('int')
+            fees_clean['id'] = fees_clean['id'].astype('int')
+
+            clean_datasets = [
+                (deposits_clean, 'pool_deposits_clean', 'transactionHash_'),
+                (withdrawals_clean, 'pool_withdrawals_clean', 'transactionHash_'),
+                (volume_clean, 'pool_volume_clean', 'id'),
+                (fees_clean, 'pool_fees_clean', 'id')
+            ]
+
             for dataset, table_name, id_column in clean_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.update_table(dataset, 'staging', table_name, id_column)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # ==========================================================
-        # CALCULATE METRICS
-        # ==========================================================
+    # ==========================================================
+    # calculate daily and aggregate metrics + upload to bigquery
+    # ==========================================================
 
-        # Calculate TVL and daily metrics
-        daily_pool_tvl, daily_protocol_tvl, tvl_snapshot = calculate_tvl_and_daily_metrics(
-            deposits_clean, withdrawals_clean
-        )
-        
-        # Calculate volume metrics
+        daily_pool_tvl, daily_protocol_tvl, tvl_snapshot = calculate_tvl_and_daily_metrics(deposits_clean, withdrawals_clean)
         daily_pool_volume, daily_pool_volume_all = calculate_volume_metrics(volume_clean)
-        
-        # Calculate fee metrics
         daily_pool_fees, daily_pool_fees_all = calculate_fee_metrics(fees_clean)
-        
-        # Calculate efficiency metrics
-        efficiency_metrics = calculate_efficiency_metrics(
-            tvl_snapshot, daily_pool_volume, daily_pool_fees
-        )
+        efficiency_metrics = calculate_efficiency_metrics(tvl_snapshot, daily_pool_volume, daily_pool_fees)
 
-        # ==========================================================
-        # UPLOAD AGGREGATED DATA TO BIGQUERY MARTS
-        # ==========================================================
-        
         ProgressIndicators.print_step("Uploading aggregated data to BigQuery marts", "start")
-
-        # Time series data (use update_table for append)
+        
         timeseries_datasets = [
             (daily_pool_tvl, 'm_pools_daily_tvl_by_pool', 'date'),
             (daily_protocol_tvl, 'm_pools_daily_tvl', 'date'),
@@ -763,28 +629,31 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                     bq.update_table(dataset, 'marts', table_name, id_column)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        # Snapshot data (use upsert for replace)
         snapshot_datasets = [
-            (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
-            (efficiency_metrics, 'm_pools_efficiency', 'pool')
+            (tvl_snapshot, 'm_pools_tvl_snapshot'),
+            (efficiency_metrics, 'm_pools_efficiency')
         ]
 
-        for dataset, name, col in snapshot_datasets:
+        for dataset, name in snapshot_datasets:
             dataset.to_csv(f'{name}.csv')
         
         if not skip_bigquery:
+            snapshot_datasets = [
+                (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
+                (efficiency_metrics, 'm_pools_efficiency', 'pool')
+            ]
+
             for dataset, table_name, id_column in snapshot_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
                     ProgressIndicators.print_step(f"Upserted {table_name} to BigQuery", "success")
 
-        # ==========================================================
-        # DISPLAY SUMMARY STATISTICS
-        # ==========================================================
+    # ==========================================================
+    # display summary stats
+    # ==========================================================
         
         ProgressIndicators.print_step("Calculating summary statistics", "start")
         
-        # Calculate key metrics
         total_tvl = tvl_snapshot['current_tvl_total'].sum()
         total_volume_7d = daily_pool_volume[
             daily_pool_volume['date'] >= (datetime.now().date() - timedelta(days=7))
@@ -793,19 +662,16 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             daily_pool_fees['timestamp'] >= (datetime.now().date() - timedelta(days=7))
         ]['total_fees_usd'].sum()
         
-        # Calculate averages
         avg_efficiency = efficiency_metrics['efficiency_score'].mean()
         avg_fee_apr = efficiency_metrics['fee_apr'].mean()
         best_performing_pool = efficiency_metrics.loc[
             efficiency_metrics['efficiency_score'].idxmax(), 'pool'
         ] if len(efficiency_metrics) > 0 else 'N/A'
         
-        # Count active pools
         active_pools = tvl_snapshot[tvl_snapshot['current_tvl_total'] > 0]['pool'].nunique()
         
         ProgressIndicators.print_step("Summary statistics calculated", "success")
         
-        # Display summary
         ProgressIndicators.print_summary_box(
             "💰 LIQUIDITY POOLS SUMMARY",
             {
@@ -819,22 +685,12 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             }
         )
         
-        # Display per-pool breakdown
         print("\n📊 Per-Pool TVL Breakdown:")
         print("-" * 50)
         for _, row in tvl_snapshot.iterrows():
             if row['current_tvl_total'] > 0:
                 print(f"  {row['pool']:<25} ${row['current_tvl_total']:>15,.2f}")
-        
-        # Display efficiency rankings
-        print("\n🏆 Pool Efficiency Rankings:")
-        print("-" * 50)
-        efficiency_sorted = efficiency_metrics.sort_values('efficiency_score', ascending=False)
-        for idx, row in efficiency_sorted.head(5).iterrows():
-            print(f"  {row['pool']:<25} Score: {row['efficiency_score']:>6.1f}/100")
 
-         # After all processing and before the final return
-        
         # Build the metrics dictionary to return
         metrics_results = {
             'tvl_snapshot': tvl_snapshot,
@@ -871,73 +727,9 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 50}")
         raise
 
-################################################
-# TEST HELPERS
-################################################
-
-def quick_test(sample_size=1000):
-    """
-    Quick test function for development.
-    Uses local CSV, samples 1000 rows, skips BigQuery.
-    
-    Usage:
-        from scripts.process_swaps_data import quick_test
-        results = quick_test()
-        results['pool_metrics']
-    """
-    return main(test_mode=True, sample_size=sample_size, skip_bigquery=True)
-
-
-def inspect_data(results, show_head=5):
-    """
-    Helper function to inspect all output dataframes.
-    
-    Usage:
-        results = quick_test()
-        inspect_data(results)
-    """
-    print(f"\n{'═' * 80}")
-    print(f"{'DATA INSPECTION':^80}")
-    print(f"{'═' * 80}\n")
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            print(f"\n{name.upper()}")
-            print(f"{'─' * 80}")
-            print(f"Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
-            print(f"\nColumns: {', '.join(df.columns.tolist())}")
-            print(f"\nFirst {show_head} rows:")
-            print(df.head(show_head).to_string())
-            print(f"\nData types:")
-            print(df.dtypes)
-            print(f"\nMemory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-            print(f"\n{'─' * 80}\n")
-
-
-def save_test_outputs(results, output_dir='./test_outputs'):
-    """
-    Save all test outputs to CSV files for manual inspection.
-    
-    Usage:
-        results = quick_test()
-        save_test_outputs(results)
-    """
-    import os
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for name, df in results.items():
-        if isinstance(df, pd.DataFrame):
-            filepath = os.path.join(output_dir, f"{name}.csv")
-            df.to_csv(filepath, index=False)
-            print(f"✓ Saved {name} to {filepath}")
-    
-    print(f"\n✅ All outputs saved to {output_dir}/")
-
 if __name__ == "__main__":
     results = main()
 
-    # For testing, uncomment one of these:
-    # results = quick_test(sample_size=500)
-    # inspect_data(results)
-    # save_test_outputs(results)
+    # results = tests.quick_test(sample_size=500)
+    # tests.inspect_data(results)
+    # tests.save_test_outputs(results)
