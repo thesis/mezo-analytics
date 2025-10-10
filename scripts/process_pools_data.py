@@ -5,24 +5,13 @@ from datetime import datetime, timedelta
 
 from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import PoolQueries
-from mezo.currency_utils import (
-    format_pool_token_columns, 
-    add_pool_usd_conversions, 
-    format_token_columns, 
-    add_usd_conversions
-)
+from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import flatten_json_column
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 from mezo.report_utils import save_metrics_snapshot
 from mezo.test_utils import tests
-from mezo.currency_config import (
-    POOLS_MAP, 
-    POOL_TOKEN_PAIRS, 
-    TOKENS_ID_MAP, 
-    TIGRIS_MAP, 
-    MEZO_ASSET_NAMES_MAP
-)
+from mezo.currency_config import POOLS_MAP, POOL_TOKEN_PAIRS, MEZO_ASSET_NAMES_MAP, TIGRIS_MAP
 
 # ==================================================
 # helper functions
@@ -30,7 +19,7 @@ from mezo.currency_config import (
 
 @with_progress("Calculating the volume for each row")
 def get_volume_for_row(row):
-    """Determine which volume to use based on token types."""
+    """Determine which asset volume to use in a pool."""
     volatiles = ['SolvBTC', 'xSolvBTC']
     stables = ['USDC', 'USDT', 'upMUSD']
     
@@ -60,14 +49,28 @@ def get_volume_for_row(row):
 @with_progress("Processing pool deposit/withdrawal data")
 def process_pools_data(raw, transaction_type):
     """Process raw data from musd-pools subgraphs"""
-    if not ExceptionHandler.validate_dataframe(raw, f"Raw {transaction_type} data", ['contractId_', 'timestamp_']):
-        raise ValueError(f"Invalid {transaction_type} data structure")
+    
+    conv = Conversions()
     
     df = raw.copy()
     df['pool'] = df['contractId_'].map(POOLS_MAP)
     df = format_datetimes(df, ['timestamp_'])
-    df = format_pool_token_columns(df, 'contractId_', POOL_TOKEN_PAIRS)
-    df = add_pool_usd_conversions(df, 'contractId_', POOL_TOKEN_PAIRS, TOKENS_ID_MAP)
+    
+    # Map pool IDs to token pairs
+    df = conv.map_pool_to_tokens(df, pool_column='contractId_', pool_token_mapping=POOL_TOKEN_PAIRS)
+    
+    amount0_cols = [col for col in df.columns if col.startswith('amount0')]
+    amount1_cols = [col for col in df.columns if col.startswith('amount1')]
+    
+    df = conv.format_token_decimals(df, amount_cols=amount0_cols, token_name_col='token0')
+    df = conv.format_token_decimals(df, amount_cols=amount1_cols, token_name_col='token1')
+    
+    # add USD conversions for both tokens
+    df = conv.add_multi_token_usd_conversions(df, token_configs=[
+        {'token_col': 'token0', 'amount_cols': amount0_cols},
+        {'token_col': 'token1', 'amount_cols': amount1_cols}
+    ])
+
     df['transaction_type'] = transaction_type
 
     return df
@@ -78,31 +81,30 @@ def process_volume_data(raw_volume):
     if not ExceptionHandler.validate_dataframe(raw_volume, "Raw volume data", ['timestamp']):
         raise ValueError("Invalid volume data structure")
     
+    conv = Conversions()
+
     df = raw_volume.copy()
-    
-    # Flatten JSON pool column
-    df = flatten_json_column(df, 'pool')
-    
-    # Format timestamps
+    df = flatten_json_column(df, 'pool') # flatten the pools column    
     df = format_datetimes(df, ['timestamp'])
-    
-    # Replace token symbols
-    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
-    for col in token_columns:
-        df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
-    
+
     # Map pool names
     df['pool'] = df['pool_name'].map(TIGRIS_MAP)
 
-    # Format token columns
-    df = format_token_columns(df, ['totalVolume0'], 'pool_token0_symbol')
-    df = format_token_columns(df, ['totalVolume1'], 'pool_token1_symbol')
+    token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
     
-    # Add USD conversions
-    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalVolume0'])
-    df = df.drop(columns=['index', 'usd'])
-    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalVolume1'])
-    df = df.drop(columns=['index', 'usd'])
+    for col in token_columns:
+        df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
+    
+    amount0_cols = [col for col in df.columns if col.startswith(('amount0', 'totalVolume0'))]
+    amount1_cols = [col for col in df.columns if col.startswith(('amount1', 'totalVolume1'))]
+
+    df = conv.format_token_decimals(df, amount_cols=amount0_cols, token_name_col='pool_token0_symbol')
+    df = conv.format_token_decimals(df, amount_cols=amount1_cols, token_name_col='pool_token1_symbol')
+
+    df = conv.add_multi_token_usd_conversions(df, token_configs=[
+        {'token_col': 'pool_token0_symbol', 'amount_cols': amount0_cols},
+        {'token_col': 'pool_token1_symbol', 'amount_cols': amount1_cols}
+    ])
     
     return df
 
@@ -112,36 +114,38 @@ def process_fees_data(raw_fees):
     if not ExceptionHandler.validate_dataframe(raw_fees, "Raw fees data", ['timestamp']):
         raise ValueError("Invalid fees data structure")
     
-    df = raw_fees.copy()
-    
-    # Flatten JSON pool column
-    df = flatten_json_column(df, 'pool')
+    conv = Conversions()
 
-    # Format timestamps
+    df = raw_fees.copy()
+    df = flatten_json_column(df, 'pool')
     df = format_datetimes(df, ['timestamp'])
+
+    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
     
-    # Replace token symbols
     token_columns = ['pool_token0_symbol', 'pool_token1_symbol']
     for col in token_columns:
         df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
-
-    # Map pool names
-    df['pool'] = df['pool_name'].map(TIGRIS_MAP)
     
-    # Format token columns
-    df = format_token_columns(df, ['totalFees0'], 'pool_token0_symbol')
-    df = format_token_columns(df, ['totalFees1'], 'pool_token1_symbol')
-    
-    # Add USD conversions
-    df = add_usd_conversions(df, 'pool_token0_symbol', TOKENS_ID_MAP, ['totalFees0'])
-    df = df.drop(columns=['index', 'usd'])
-    df = add_usd_conversions(df, 'pool_token1_symbol', TOKENS_ID_MAP, ['totalFees1'])
-    df = df.drop(columns=['index', 'usd', 'pool_token0_symbol', 'pool_token1_symbol'])
+    # Detect amount columns for each token
+    amount0_cols = [col for col in df.columns if col.startswith(('amount0', 'totalFees0'))]
+    amount1_cols = [col for col in df.columns if col.startswith(('amount1', 'totalFees1'))]
 
-    df = df[[
-        'timestamp', 'pool_name', 'pool', 'totalFees0', 'totalFees1', 
-        'totalFees0_usd', 'totalFees1_usd', 'id'
-    ]]
+    df = conv.format_token_decimals(df, amount_cols=amount0_cols, token_name_col='pool_token0_symbol')
+    df = conv.format_token_decimals(df, amount_cols=amount1_cols, token_name_col='pool_token1_symbol')
+
+    df = conv.add_multi_token_usd_conversions(df, token_configs=[
+        {'token_col': 'pool_token0_symbol', 'amount_cols': amount0_cols},
+        {'token_col': 'pool_token1_symbol', 'amount_cols': amount1_cols}
+    ])
+    
+    df['total_fees_usd'] = df['totalFees0_usd'] + df['totalFees1_usd']
+
+    # df = df[[
+    #     'timestamp', 'pool', 'pool_name', 'totalFees0', 'totalFees1', 
+    #     'totalFees0_usd', 'totalFees1_usd', 'id'
+    # ]]
+
+    print(df.head())
     
     return df
 
@@ -541,10 +545,26 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
     # ==========================================================
     
         subgraph_data = [
-            ('deposits_data', 'pool deposits', SubgraphClient.POOLS_SUBGRAPH, PoolQueries.GET_DEPOSITS, 'mints'),
-            ('withdrawals_data', 'pool withdrawals', SubgraphClient.POOLS_SUBGRAPH, PoolQueries.GET_WITHDRAWALS, 'burns'),
-            ('volume_data', 'pool volume', SubgraphClient.TIGRIS_POOLS_SUBGRAPH, PoolQueries.GET_POOL_VOLUME, 'poolVolumes'),
-            ('fees_data', 'pool fees', SubgraphClient.TIGRIS_POOLS_SUBGRAPH, PoolQueries.GET_TOTAL_POOL_FEES, 'feesStats_collection')
+            (
+                'deposits_data', 'pool deposits', 
+                SubgraphClient.POOLS_SUBGRAPH, 
+                PoolQueries.GET_DEPOSITS, 
+                'mints'),
+            (
+                'withdrawals_data', 'pool withdrawals', 
+                SubgraphClient.POOLS_SUBGRAPH, 
+                PoolQueries.GET_WITHDRAWALS, 
+                'burns'),
+            (
+                'volume_data', 'pool volume', 
+                SubgraphClient.TIGRIS_POOLS_SUBGRAPH, 
+                PoolQueries.GET_POOL_VOLUME, 
+                'poolVolumes'),
+            (
+                'fees_data', 'pool fees', 
+                SubgraphClient.TIGRIS_POOLS_SUBGRAPH, 
+                PoolQueries.GET_TOTAL_POOL_FEES, 
+                'feesStats_collection')
         ]
 
         data_results = {}
@@ -560,7 +580,18 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         withdrawals_data = data_results['withdrawals_data']
         volume_data = data_results['volume_data']
         fees_data = data_results['fees_data']
-
+        
+        if test_mode:
+            dfs = [
+                (deposits_data, 'deposits_data'), 
+                (withdrawals_data, 'withdrawals_data'), 
+                (volume_data, 'volume_data'), 
+                (fees_data, 'fees_data')]
+    
+            for df, name in dfs:
+                df.to_csv(f'{name}.csv')
+                print(df.columns)
+                
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")        
             fees_data['id'] = fees_data['id'].astype('int')
@@ -584,7 +615,9 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         deposits_clean = process_pools_data(deposits_data, 'deposit')
         withdrawals_clean = process_pools_data(withdrawals_data, 'withdrawal')
         volume_clean = process_volume_data(volume_data)
+        print(volume_clean.columns)
         fees_clean = process_fees_data(fees_data)
+        print(fees_clean.columns)
         
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading clean data to BigQuery staging", "start")
@@ -612,37 +645,36 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         daily_pool_fees, daily_pool_fees_all = calculate_fee_metrics(fees_clean)
         efficiency_metrics = calculate_efficiency_metrics(tvl_snapshot, daily_pool_volume, daily_pool_fees)
 
-        ProgressIndicators.print_step("Uploading aggregated data to BigQuery marts", "start")
-        
-        timeseries_datasets = [
-            (daily_pool_tvl, 'm_pools_daily_tvl_by_pool', 'date'),
-            (daily_protocol_tvl, 'm_pools_daily_tvl', 'date'),
-            (daily_pool_volume, 'm_pools_daily_volume_by_pool', 'date'),
-            (daily_pool_volume_all, 'm_pools_daily_volume', 'date'),
-            (daily_pool_fees, 'm_pools_daily_fees_by_pool', 'timestamp'),
-            (daily_pool_fees_all, 'm_pools_daily_fees', 'timestamp')
-        ]
-
         if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading aggregated data to BigQuery marts", "start")
+        
+            timeseries_datasets = [
+                (daily_pool_tvl, 'm_pools_daily_tvl_by_pool', 'date'),
+                (daily_protocol_tvl, 'm_pools_daily_tvl', 'date'),
+                (daily_pool_volume, 'm_pools_daily_volume_by_pool', 'date'),
+                (daily_pool_volume_all, 'm_pools_daily_volume', 'date'),
+                (daily_pool_fees, 'm_pools_daily_fees_by_pool', 'timestamp'),
+                (daily_pool_fees_all, 'm_pools_daily_fees', 'timestamp')
+            ]
             for dataset, table_name, id_column in timeseries_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.update_table(dataset, 'marts', table_name, id_column)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
-        snapshot_datasets = [
+        snapshots = [
             (tvl_snapshot, 'm_pools_tvl_snapshot'),
             (efficiency_metrics, 'm_pools_efficiency')
         ]
 
-        for dataset, name in snapshot_datasets:
+        for dataset, name in snapshots:
             dataset.to_csv(f'{name}.csv')
         
         if not skip_bigquery:
+
             snapshot_datasets = [
                 (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
                 (efficiency_metrics, 'm_pools_efficiency', 'pool')
             ]
-
             for dataset, table_name, id_column in snapshot_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
@@ -664,9 +696,9 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         
         avg_efficiency = efficiency_metrics['efficiency_score'].mean()
         avg_fee_apr = efficiency_metrics['fee_apr'].mean()
-        best_performing_pool = efficiency_metrics.loc[
-            efficiency_metrics['efficiency_score'].idxmax(), 'pool'
-        ] if len(efficiency_metrics) > 0 else 'N/A'
+        # best_performing_pool = efficiency_metrics.loc[
+        #     efficiency_metrics['efficiency_score'].idxmax(), 'pool'
+        # ] if len(efficiency_metrics) > 0 else 'N/A'
         
         active_pools = tvl_snapshot[tvl_snapshot['current_tvl_total'] > 0]['pool'].nunique()
         
@@ -681,7 +713,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                 "Active Pools": active_pools,
                 "Average Fee APR": f"{avg_fee_apr:.2f}%",
                 "Average Efficiency Score": f"{avg_efficiency:.1f}/100",
-                "Best Performing Pool": best_performing_pool
+                # "Best Performing Pool": best_performing_pool
             }
         )
         
@@ -707,7 +739,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             'total_fees_7d': total_fees_7d,
             'avg_efficiency': avg_efficiency,
             'avg_fee_apr': avg_fee_apr,
-            'best_performing_pool': best_performing_pool
+            # 'best_performing_pool': best_performing_pool
         }
         
         # Save metrics snapshot for report generation
@@ -728,8 +760,9 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         raise
 
 if __name__ == "__main__":
-    results = main()
+    results = main(skip_bigquery=True)
 
+    # test = tests()
     # results = tests.quick_test(sample_size=500)
-    # tests.inspect_data(results)
+    # test.inspect_data(results)
     # tests.save_test_outputs(results)

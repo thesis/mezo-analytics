@@ -1,20 +1,13 @@
-import json
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime, date
-import numpy as np
-from mezo.currency_utils import format_pool_token_columns, add_usd_conversions
+from datetime import datetime
+from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
 from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import MUSDQueries
 from mezo.test_utils import tests
 from mezo.report_utils import save_metrics_snapshot
-from mezo.currency_config import (
-    POOL_TOKEN_PAIRS, 
-    POOLS_MAP, 
-    TOKENS_ID_MAP, 
-    MEZO_ASSET_NAMES_MAP
-)
+from mezo.currency_config import POOL_TOKEN_PAIRS, POOLS_MAP
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
 ################################################
@@ -22,36 +15,36 @@ from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progres
 ################################################
 
 @with_progress("Cleaning swap and fee data")
-def clean_swap_and_fee_data(raw, swap=True):
+def clean_swap_and_fee_data(raw):
     """Clean and format swap data with proper token conversions"""
     if not ExceptionHandler.validate_dataframe(raw, "Raw swap data", ['contractId_', 'timestamp_']):
         raise ValueError("Invalid input data for cleaning")
+
+    conv = Conversions()
     
     df = raw.copy()
-    
-    # maps pool contract addresses to readable names
     df['pool'] = df['contractId_'].map(POOLS_MAP)
-    
     df = format_datetimes(df, ['timestamp_'])
-    
-    df = format_pool_token_columns(df, 'contractId_', POOL_TOKEN_PAIRS)
-    
-    # removes "m" prefix from asset names for proper conversions
-    token_columns = ['token0', 'token1']    
-    for col in token_columns:
-        df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
+    df = conv.map_pool_to_tokens(df, pool_column='contractId_', pool_token_mapping=POOL_TOKEN_PAIRS)
 
-    # converts using the coingecko API
-    if not swap:
-        df = add_usd_conversions(df, 'token0', TOKENS_ID_MAP, ['amount0'])
-        df = df.drop(columns=['index', 'usd'])
-        df = add_usd_conversions(df, 'token1', TOKENS_ID_MAP, ['amount1'])
-        df = df.drop(columns=['index', 'usd'])
-    else:
-        df = add_usd_conversions(df, 'token0', TOKENS_ID_MAP, ['amount0In', 'amount0Out'])
-        df = df.drop(columns=['index', 'usd'])
-        df = add_usd_conversions(df, 'token1', TOKENS_ID_MAP, ['amount1In', 'amount1Out'])
-        df = df.drop(columns=['index', 'usd'])
+    # determine which amount columns to process based on swap flag
+    # if swap:
+    #     amount0_cols = [col for col in df.columns if col.startswith('amount0') and col in ['amount0In', 'amount0Out']]
+    #     amount1_cols = [col for col in df.columns if col.startswith('amount1') and col in ['amount1In', 'amount1Out']]
+    # else:
+    #     amount0_cols = ['amount0']
+    #     amount1_cols = ['amount1']
+    
+    amount0_cols = [col for col in df.columns if col.startswith(('amount0'))]
+    amount1_cols = [col for col in df.columns if col.startswith(('amount1'))]
+
+    df = conv.format_token_decimals(df, amount_cols=amount0_cols, token_name_col='token0')
+    df = conv.format_token_decimals(df, amount_cols=amount1_cols, token_name_col='token1')
+
+    df = conv.add_multi_token_usd_conversions(df, token_configs=[
+        {'token_col': 'token0', 'amount_cols': amount0_cols},
+        {'token_col': 'token1', 'amount_cols': amount1_cols}
+    ])
     
     df['count'] = 1
     
@@ -126,7 +119,6 @@ def get_swaps_by_pool(df):
     pool_metrics = pool_metrics.sort_values('total_volume', ascending=False)
     
     return pool_metrics
-
 
 @with_progress("Creating daily time series")
 def get_daily_swaps(df):
@@ -260,7 +252,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         # clean data + upload to bigquery
         # ============================================
         swaps_df_clean = clean_swap_and_fee_data(raw_swap_data)
-        fees_df_clean = clean_swap_and_fee_data(raw_fees_data, swap=False)
+        fees_df_clean = clean_swap_and_fee_data(raw_fees_data)
 
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
@@ -366,13 +358,16 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 60}\n")
         
         print("Top 5 Pools by Volume:")
-        print(pool_metrics.head()[['pool', 'total_volume', 'swap_count']].to_string(index=False))
+        top_5_pools = pool_metrics.head()[['pool', 'total_volume', 'swap_count']].copy()
+        top_5_pools['total_volume'] = top_5_pools['total_volume'].apply(lambda x: f"${x:,.2f}")
+        top_5_pools['swap_count'] = top_5_pools['swap_count'].apply(lambda x: f"{x:,.2f}")
+        print(top_5_pools.to_string(index=False))
         print(f"\n{'─' * 60}\n")
 
         # recalculate summary statistics to ensure they're in the results
         total_swaps = summary_metrics['total_swaps'].iloc[0]
         total_users = summary_metrics['users'].iloc[0]
-        total_volume_usd = summary_metrics['total_volume'].iloc[0]
+        total_volume = summary_metrics['total_volume'].iloc[0]
         total_fees = summary_metrics['total_fees'].iloc[0]
         avg_swap_size_usd = summary_metrics['avg_swap_size'].iloc[0]
         
@@ -393,7 +388,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         top_pools = []
         if pool_metrics is not None and len(pool_metrics) > 0:
             top_pools = pool_metrics[[
-                'pool', 'total_volume_usd', 'swap_count', 'users', 'avg_swap_size'
+                'pool', 'total_volume', 'swap_count', 'users', 'avg_swap_size'
             ]].to_dict('records')
         
         # create comprehensive metrics dictionary
@@ -403,7 +398,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             'pool_summary': pool_metrics,
             'total_swaps': total_swaps,
             'total_users': total_users,
-            'total_volume_usd': total_volume_usd,
+            'total_volume': total_volume,
             'total_fees': total_fees,
             'avg_swap_size_usd': avg_swap_size_usd,
             'seven_day_volume': seven_day_volume,
@@ -419,9 +414,10 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         ProgressIndicators.print_summary_box(
             f"🔄 SWAPS SUMMARY STATISTICS 🔄",
             {
-                "Total Swaps": total_swaps,
-                "Unique Users": total_users,
-                "Total Volume (USD)": f"${total_volume_usd:,.2f}"            }
+                "Total Swaps": f"{total_swaps:,.2f}",
+                "Unique Users": f"{total_users:,.2f}",
+                "Total Volume (USD)": f"${total_volume:,.2f}"
+            }
         )
 
         ProgressIndicators.print_header("🚀 SWAPS PROCESSING COMPLETED SUCCESSFULLY 🚀")
@@ -440,7 +436,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
 
 
 if __name__ == "__main__":
-    results = main(skip_bigquery=True)
+    results = main()
 
     # results = tests.quick_test(main, sample_size=500)
     # tests.inspect_data(results)
