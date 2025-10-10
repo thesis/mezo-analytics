@@ -630,14 +630,19 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         snapshot_datasets = [
-            (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
-            (efficiency_metrics, 'm_pools_efficiency', 'pool')
+            (tvl_snapshot, 'm_pools_tvl_snapshot'),
+            (efficiency_metrics, 'm_pools_efficiency')
         ]
 
         for dataset, name in snapshot_datasets:
             dataset.to_csv(f'{name}.csv')
         
         if not skip_bigquery:
+            snapshot_datasets = [
+                (tvl_snapshot, 'm_pools_tvl_snapshot', 'pool'),
+                (efficiency_metrics, 'm_pools_efficiency', 'pool')
+            ]
+
             for dataset, table_name, id_column in snapshot_datasets:
                 if dataset is not None and len(dataset) > 0:
                     bq.upsert_table_by_id(dataset, 'marts', table_name, id_column)
