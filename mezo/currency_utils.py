@@ -1,257 +1,303 @@
 from decimal import Decimal
 import os
 import requests
-# from dotenv import load_dotenv
-from mezo.currency_config import TOKENS_ID
+from mezo.currency_config import TOKENS_ID, MEZO_ASSET_NAMES_MAP, TOKENS_ID_MAP, POOL_TOKEN_PAIRS, TOKEN_MAP
 import pandas as pd
 
-# load_dotenv(dotenv_path="../.env", override=True)
-COINGECKO_KEY = os.getenv('COINGECKO_KEY')
+class Conversions:
 
-def format_currency_columns(df, cols, asset):
-    def convert(x, token):
-        if pd.isnull(x):
-            return 0
-        if token in {"USDC", "USDT"}:
-            scale = Decimal("1e6")
-        elif token in {"WBTC", "FBTC", "cbBTC", "swBTC"}:
-            scale = Decimal("1e8")
-        else:
-            scale = Decimal("1e18")
-        return float((Decimal(x) / scale).normalize())
+    def __init__(self):
+        self.coingecko_key = os.getenv('COINGECKO_KEY')
+        self.DEFAULT_DECIMALS = 1e18
+        self.DECIMALS_MAP = {
+            'USDC': 1e6,
+            'USDT': 1e6,
+            'mUSDC': 1e6,
+            'mUSDT': 1e6,
+            
+            'WBTC': 1e8,
+            'FBTC': 1e8,
+            'cbBTC': 1e8,
+            'swBTC': 1e8,
+        }
+        self.MEZO_STABLES = ['MUSD', 'upMUSD']
 
-    for col in cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        df[col] = df.apply(lambda row: convert(row[col], row[asset]), axis=1)
-    
-    return df
+    def _standardize_token_symbols(self, df, cols):
+        """ 
+        Removes the m prefix on Mezo assets for easier price conversions
+        Uses the MEZO_ASSET_NAMES_MAP in currency_config
 
-def format_token_columns(df, cols, asset):
-    def convert(x, token):
-        if pd.isnull(x):
-            return 0
-        if token in {"USDC", "USDT", "mUSDC", "mUSDT"}:
-            scale = Decimal("1e6")
-        elif token in {"WBTC", "FBTC", "cbBTC", "swBTC"}:
-            scale = Decimal("1e8")
-        else:
-            scale = Decimal("1e18")
-        return float((Decimal(x) / scale).normalize())
+        Parameters:
+            df: the dataframe containing columns with token symbols with with 'm' prefix
+            cols: the columns in the dataframe with token symbols with the 'm' prefix
+        """
+        token_columns = [cols] if isinstance(cols, str) else cols
 
-    for col in cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        df[col] = df.apply(lambda row: convert(row[col], row[asset]), axis=1)
-    
-    return df
+        for col in token_columns:
+            df[col] = df[col].replace(MEZO_ASSET_NAMES_MAP)
 
-def format_pool_token_columns(df, pool_column, pool_token_pairs):
-    """
-    Format token columns for pool data using token pair mappings
+        return df
     
-    Args:
-        df: DataFrame containing pool data
-        pool_column: Name of column containing pool identifiers (contractId_)
-        pool_token_pairs: Dictionary mapping pool IDs to token0/token1 pairs
-    
-    Returns:
-        DataFrame with formatted token columns and token0/token1 mappings
-    """
-    def convert(x, token):
-        if pd.isnull(x):
-            return 0
-        if token in {"USDC", "USDT", "mUSDC", "mUSDT"}:
-            scale = Decimal("1e6")
-        elif token in {"BTC", "MUSD"}:
-            scale = Decimal("1e18")
-        else:
-            scale = Decimal("1e18")  # Default for everything else
-        return float((Decimal(x) / scale).normalize())
-    
-    df_result = df.copy()
-    
-    # Add token0 and token1 columns based on pool mapping
-    df_result['token0'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token0'))
-    df_result['token1'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token1'))
-    
-    # Format amount0 columns using token0
-    amount0_cols = [col for col in df_result.columns if col.startswith('amount0')]
-    for col in amount0_cols:
-        df_result[col] = pd.to_numeric(df_result[col], errors='coerce')
-        df_result[col] = df_result.apply(lambda row: convert(row[col], row['token0']), axis=1)
-    
-    # Format amount1 columns using token1  
-    amount1_cols = [col for col in df_result.columns if col.startswith('amount1')]
-    for col in amount1_cols:
-        df_result[col] = pd.to_numeric(df_result[col], errors='coerce')
-        df_result[col] = df_result.apply(lambda row: convert(row[col], row['token1']), axis=1)
-    
-    # Format totalVolume columns if they exist
-    if 'totalVolume0' in df_result.columns:
-        df_result['totalVolume0'] = pd.to_numeric(df_result['totalVolume0'], errors='coerce')
-        df_result['totalVolume0'] = df_result.apply(lambda row: convert(row['totalVolume0'], row['token0']), axis=1)
-    
-    if 'totalVolume1' in df_result.columns:
-        df_result['totalVolume1'] = pd.to_numeric(df_result['totalVolume1'], errors='coerce')
-        df_result['totalVolume1'] = df_result.apply(lambda row: convert(row['totalVolume1'], row['token1']), axis=1)
-    
-    return df_result
+    def add_usd_rate_column(self, df, token_column, rate_column_name='usd_rate'):
+        """
+        Add a USD rate column for a given token column
 
-def format_musd_currency_columns(df, cols):
-    df[cols] = df[cols].apply(lambda col: pd.to_numeric(col, errors='coerce').apply(
-        lambda x: float((Decimal(x) / Decimal("1e18")).normalize()) if pd.notnull(x) else 0
-    ))
-    return df
+        Args:
+            df: DataFrame containing token data
+            token_column: Name of column containing token symbols
+            rate_column_name: Name for the new USD rate column
 
-def replace_token_labels(df, token_map):
-    """
-    Replaces values in the 'token' column using the TOKEN_MAP dictionary in currency_config.
+        Returns:
+            DataFrame with added rate column
+        """
+        prices = self.get_token_prices()
+        if prices is None or prices.empty:
+            raise ValueError("No token prices received from API")
 
-    Parameters:
-        df: The DataFrame containing a 'token' column.
-        token_map (dict): Dictionary mapping token addresses to human-readable labels.
+        token_usd_prices = prices.T.reset_index()
 
-    Returns:
-        pd.DataFrame: Updated DataFrame with replaced token values.
-    """
-    # Normalize the token column to lowercase for matching
-    df['token'] = df['token'].str.lower()
+        df_result = df.copy()
 
-    # Normalize the token_map keys to lowercase
-    normalized_map = {k.lower(): v for k, v in token_map.items()}
+        # Standardize token symbols before mapping (e.g., 'mT' -> 'T')
+        df_result = self._standardize_token_symbols(df_result, token_column)
 
-    df['token'] = df['token'].replace(normalized_map)
-    return df
+        # Use .get() to handle tokens not in TOKENS_ID_MAP gracefully
+        df_result['_temp_index'] = df_result[token_column].apply(
+            lambda x: TOKENS_ID_MAP.get(x) if pd.notna(x) else None
+        )
 
-def get_token_prices():
-    url = 'https://api.coingecko.com/api/v3/simple/price'
-    params = {'ids': TOKENS_ID, 'vs_currencies': 'usd'}
-    headers = {'x-cg-demo-api-key': COINGECKO_KEY}
+        df_result = pd.merge(df_result, token_usd_prices, left_on='_temp_index', right_on='index', how='left')
+        df_result = df_result.rename(columns={'usd': rate_column_name})
+        df_result = df_result.drop(columns=['_temp_index', 'index'])
 
-    response = requests.get(url, params = params)
+        # Set Mezo stablecoins to 1.0
+        df_result.loc[df_result[token_column].isin(self.MEZO_STABLES), rate_column_name] = 1.0
 
-    data = response.json()
-    df = pd.DataFrame(data)
-
-    return df
-
-def get_token_price(token_id):
-    url = 'https://api.coingecko.com/api/v3/simple/price'
-    params = {'ids': token_id, 'vs_currencies': 'usd'}
-    headers = {'x-cg-demo-api-key': COINGECKO_KEY}
-
-    response = requests.get(url, params = params)
-
-    data = response.json()
-    price = data[token_id]['usd']
+        return df_result
     
-    return price
+    def get_token_prices(self):
+        """ Retrieves USD conversion price for all tokens from Coingecko """
+        url = 'https://api.coingecko.com/api/v3/simple/price'
+        params = {'ids': TOKENS_ID, 'vs_currencies': 'usd'}
+        headers = {'x-cg-demo-api-key': self.coingecko_key}
 
-def add_pool_usd_conversions(df, pool_column, pool_token_pairs, tokens_id_map):
-    """
-    Add USD conversions for pool data with token0/token1 pairs
-    
-    Args:
-        df: DataFrame containing pool data
-        pool_column: Name of column containing pool identifiers (contractId_)
-        pool_token_pairs: Dictionary mapping pool IDs to token0/token1 pairs
-        tokens_id_map: Dictionary mapping tokens to CoinGecko IDs
-    
-    Returns:
-        DataFrame with USD conversion columns added
-    """
-    if pool_column not in df.columns:
-        raise ValueError(f"Column '{pool_column}' not found in DataFrame")
-    
-    # Get token prices
-    prices = get_token_prices()
-    if prices is None or prices.empty:
-        raise ValueError("No token prices received from API")
-    
-    token_usd_prices = prices.T.reset_index()
-    df_result = df.copy()
-    
-    # Add token0 and token1 columns based on pool mapping
-    df_result['token0'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token0'))
-    df_result['token1'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token1'))
-    
-    # Create separate rows for token0 and token1 conversions
-    df_result['token0_index'] = df_result['token0'].map(tokens_id_map)
-    df_result['token1_index'] = df_result['token1'].map(tokens_id_map)
-    
-    # Merge token0 prices
-    token0_prices = token_usd_prices.rename(columns={'index': 'token0_index', 'usd': 'token0_usd_rate'})
-    df_result = pd.merge(df_result, token0_prices[['token0_index', 'token0_usd_rate']], on='token0_index', how='left')
-    
-    # Merge token1 prices
-    token1_prices = token_usd_prices.rename(columns={'index': 'token1_index', 'usd': 'token1_usd_rate'})
-    df_result = pd.merge(df_result, token1_prices[['token1_index', 'token1_usd_rate']], on='token1_index', how='left')
-    
-    # set MUSD and upMUSD rate to 1.0
-    df_result.loc[df_result['token0'] == 'MUSD', 'token0_usd_rate'] = 1.0
-    df_result.loc[df_result['token1'] == 'MUSD', 'token1_usd_rate'] = 1.0
-    df_result.loc[df_result['token0'] == 'upMUSD', 'token0_usd_rate'] = 1.0
-    df_result.loc[df_result['token1'] == 'upMUSD', 'token1_usd_rate'] = 1.0
-    
-    # Convert amount columns to USD
-    for col_base in ['totalVolume', 'amount']:
-        # Handle regular columns (totalVolume0, amount0)
-        if f'{col_base}0' in df_result.columns:
-            df_result[f'{col_base}0'] = pd.to_numeric(df_result[f'{col_base}0'], errors='coerce').fillna(0)
-            df_result[f'{col_base}0_usd'] = df_result[f'{col_base}0'] * df_result['token0_usd_rate']
-        if f'{col_base}1' in df_result.columns:
-            df_result[f'{col_base}1'] = pd.to_numeric(df_result[f'{col_base}1'], errors='coerce').fillna(0)
-            df_result[f'{col_base}1_usd'] = df_result[f'{col_base}1'] * df_result['token1_usd_rate']
+        response = requests.get(url, params = params)
+
+        data = response.json()
+        df = pd.DataFrame(data)
+
+        return df
+
+    def get_token_price(self, token_id):
+        """ Retrieves a single token's USD conversion price from Coingecko """
+        url = 'https://api.coingecko.com/api/v3/simple/price'
+        params = {'ids': token_id, 'vs_currencies': 'usd'}
+        headers = {'x-cg-demo-api-key': self.coingecko_key}
+
+        response = requests.get(url, params = params)
+
+        data = response.json()
+        price = data[token_id]['usd']
         
-        # Handle swap columns (amount0In, amount0Out, amount1In, amount1Out)
-        for suffix in ['In', 'Out']:
-            if f'{col_base}0{suffix}' in df_result.columns:
-                df_result[f'{col_base}0{suffix}'] = pd.to_numeric(df_result[f'{col_base}0{suffix}'], errors='coerce').fillna(0)
-                df_result[f'{col_base}0{suffix}_usd'] = df_result[f'{col_base}0{suffix}'] * df_result['token0_usd_rate']
-            if f'{col_base}1{suffix}' in df_result.columns:
-                df_result[f'{col_base}1{suffix}'] = pd.to_numeric(df_result[f'{col_base}1{suffix}'], errors='coerce').fillna(0)
-                df_result[f'{col_base}1{suffix}_usd'] = df_result[f'{col_base}1{suffix}'] * df_result['token1_usd_rate']
-    
-    return df_result
+        return price
 
-def add_usd_conversions(df, token_column, tokens_id_map, amount_columns=None):
-    """
-    Add USD price conversions to any token data
+    def format_token_decimals(self, df, amount_cols, token_name_col=None):
+        """
+        Format token amount columns by removing decimals
+        
+        Parameters:
+            df : pd.DataFrame
+                DataFrame containing token amount data
+            amount_cols : str or list
+                Column name(s) to format
+            token_name_col : str, optional
+                Column containing token symbols. If provided, uses token-specific decimals.
+                If None, uses DEFAULT_DECIMALS for all columns
+        """
+        if isinstance(amount_cols, str):
+            amount_cols = [amount_cols]
+
+        df[amount_cols] = df[amount_cols].apply(pd.to_numeric, errors='coerce')  # MOVED OUTSIDE IF/ELSE
+
+        if token_name_col is not None:
+            self._standardize_token_symbols(df, token_name_col)
+            for col in amount_cols:
+                df[col] = df.apply(
+                    lambda row: row[col] / self.DECIMALS_MAP.get(row[token_name_col], self.DEFAULT_DECIMALS),
+                    axis=1
+                )
+        else:
+            df[amount_cols] = df[amount_cols] / self.DEFAULT_DECIMALS  # VECTORIZED
     
-    Args:
-        df: DataFrame containing token data
-        token_column: Name of column containing token identifiers
-        tokens_id_map: Dictionary mapping tokens to CoinGecko IDs
-        amount_columns: List of amount columns to convert, or None for auto-detection
+        return df
+
+    def add_usd_conversions(self, df, token_column, amount_columns):
+        """
+        Add USD price conversions to token amount columns
+        
+        Args:
+            df: DataFrame containing token data
+            token_column: Name of column containing token identifiers
+            amount_columns: List of amount columns to convert
+        """
+        df_result = self.add_usd_rate_column(df, token_column, 'usd_rate')
+        
+        for col in amount_columns:
+            if col in df_result.columns:
+                usd_col_name = f"{col}_usd" if not col.endswith('_usd') else col
+                df_result[usd_col_name] = df_result[col] * df_result['usd_rate']
+        
+        return df_result
+     
+    def add_multi_token_usd_conversions(self, df, token_configs):
+        """
+        Add USD conversions for multiple token columns (e.g., liquidity pools with token0/token1)
+        
+        Args:
+            df: DataFrame containing token data
+            token_configs: List of dicts with format:
+                [
+                    {'token_col': 'token0', 'amount_cols': ['amount0', 'amount0In', 'amount0Out']},
+                    {'token_col': 'token1', 'amount_cols': ['amount1', 'amount1In', 'amount1Out']}
+                ]
+        
+        Returns:
+            DataFrame with USD conversions for all specified token/amount column pairs
+        """
+        df_result = df.copy()
+        
+        # Add USD rate columns for each token
+        for config in token_configs:
+            token_col = config['token_col']
+            rate_col = f"{token_col}_usd_rate"
+            df_result = self.add_usd_rate_column(df_result, token_col, rate_col)
+        
+        # Convert amount columns to USD
+        for config in token_configs:
+            token_col = config['token_col']
+            rate_col = f"{token_col}_usd_rate"
+            
+            for amount_col in config['amount_cols']:
+                if amount_col in df_result.columns:
+                    df_result[amount_col] = pd.to_numeric(df_result[amount_col], errors='coerce').fillna(0)
+                    df_result[f"{amount_col}_usd"] = df_result[amount_col] * df_result[rate_col]
+        
+        return df_result
+
+    def replace_token_addresses_with_symbols(self, df, token_column='token'):
+        """
+        Replaces token addresses with token symbols using the TOKEN_MAP dict in currency_config.
+        """
+        df[token_column] = df[token_column].str.lower()  # CHANGED FROM HARDCODED 'token'
+        normalized_map = {k.lower(): v for k, v in TOKEN_MAP.items()}
+        df[token_column] = df[token_column].replace(normalized_map)  # CHANGED FROM HARDCODED 'token'
+
+        return df
     
-    Returns:
-        DataFrame with USD conversion columns added
-    """
-    if token_column not in df.columns:
-        raise ValueError(f"Column '{token_column}' not found in DataFrame")
+    def map_pool_to_tokens(self, df, pool_column, pool_token_mapping):
+        """
+        Add token0 and token1 columns based on pool identifier mapping
+        
+        Args:
+            df: DataFrame containing pool data
+            pool_column: Name of column containing pool identifiers
+            pool_token_mapping: Dictionary mapping pool IDs to token pairs
+                Example: {'pool_id': {'token0': 'USDC', 'token1': 'WBTC'}}
+        """
+
+        df['token0'] = df[pool_column].map(lambda x: pool_token_mapping.get(x, {}).get('token0'))
+        df['token1'] = df[pool_column].map(lambda x: pool_token_mapping.get(x, {}).get('token1'))
+        
+        return df
+
+# def format_pool_token_columns(df, pool_column, pool_token_pairs):
+#     """
+#     Converts decimals in liquidity pool columns using token pair mappings
     
-    # Get token prices
-    prices = get_token_prices()
-    if prices is None or prices.empty:
-        raise ValueError("No token prices received from API")
+#     Args:
+#         df: DataFrame containing pool data
+#         pool_column: Name of column containing pool identifiers (contractId_)
+#         pool_token_pairs: Dictionary mapping pool IDs to token0/token1 pairs
+#     """
+
+#     # ==================================================
+#     # NOW TAKEN CARE OF IN MAP POOL TO TOKENS FCN
+#     # ==================================================
+#     df_result = df.copy()
     
-    token_usd_prices = prices.T.reset_index()
-    df_result = df.copy()
-    df_result['index'] = df_result[token_column].map(tokens_id_map)
+#     # Add token0 and token1 columns based on pool mapping
+#     df_result['token0'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token0'))
+#     df_result['token1'] = df_result[pool_column].map(lambda x: pool_token_pairs.get(x, {}).get('token1'))
+#     # ==================================================
+#     # ==================================================
+
+#     # Convert decimals in amount0 columns using token0 and amount1 columns using token1
+#     amount0_cols = [col for col in df_result.columns if col.startswith('amount0')]
+#     Conversions.format_token_decimals(df=df_result, amount_cols=amount0_cols, token_name_col='token0')
     
-    df_with_usd = pd.merge(df_result, token_usd_prices, how='left', on='index')
+#     amount1_cols = [col for col in df_result.columns if col.startswith('amount1')]
+#     Conversions.format_token_decimals(df=df_result, amount_cols=amount1_cols, token_name_col='token1')
     
-    # Set MUSD price to 1.0 (1:1 with USD)
-    df_with_usd.loc[df_with_usd[token_column] == 'MUSD', 'usd'] = 1.0
-    df_with_usd.loc[df_with_usd[token_column] == 'upMUSD', 'usd'] = 1.0
+#     # Convert decimals in totalVolume columns if they exist
+#     if 'totalVolume0' in df_result.columns:
+#         Conversions.format_token_decimals(df=df_result, amount_cols=['totalVolume0'], token_name_col='token0')
     
-    # Auto-detect amount columns if not provided
-    if amount_columns is None:
-        amount_columns = [col for col in df.columns if 'amount' in col.lower() and col != 'amount_usd']
+#     if 'totalVolume1' in df_result.columns:
+#         Conversions.format_token_decimals(df=df_result, amount_cols=['totalVolume1'], token_name_col='token1')
     
-    # Add USD conversion for each amount column
-    for col in amount_columns:
-        if col in df_with_usd.columns:
-            usd_col_name = f"{col}_usd" if not col.endswith('_usd') else col
-            df_with_usd[usd_col_name] = df_with_usd[col] * df_with_usd['usd']
+#     return df_result
+
+# def add_pool_usd_conversions(df, pool_column):
+#     """
+#     Add USD conversions for pool data with token0/token1 pairs
     
-    return df_with_usd
+#     Args:
+#         df: DataFrame containing pool data
+#         pool_column: Name of column containing pool identifiers (contractId_)
+#     """
+#     # Get token prices
+#     prices =  Conversions.get_token_prices()
+#     if prices is None or prices.empty:
+#         raise ValueError("No token prices received from API")
+    
+#     token_usd_prices = prices.T.reset_index()
+#     df_result = df.copy()
+    
+#     # Add token0 and token1 columns based on pool mapping from the POOL_TOKEN_PAIRS dict in currency_config
+#     df_result['token0'] = df_result[pool_column].map(lambda x: POOL_TOKEN_PAIRS.get(x, {}).get('token0'))
+#     df_result['token1'] = df_result[pool_column].map(lambda x: POOL_TOKEN_PAIRS.get(x, {}).get('token1'))
+    
+#     # Create separate rows for token0 and token1 conversions using TOKENS_ID_MAP from currency_config
+#     df_result['token0_index'] = df_result['token0'].map(TOKENS_ID_MAP)
+#     df_result['token1_index'] = df_result['token1'].map(TOKENS_ID_MAP)
+    
+#     # Merge token0 prices
+#     token0_prices = token_usd_prices.rename(columns={'index': 'token0_index', 'usd': 'token0_usd_rate'})
+#     df_result = pd.merge(df_result, token0_prices[['token0_index', 'token0_usd_rate']], on='token0_index', how='left')
+    
+#     # Merge token1 prices
+#     token1_prices = token_usd_prices.rename(columns={'index': 'token1_index', 'usd': 'token1_usd_rate'})
+#     df_result = pd.merge(df_result, token1_prices[['token1_index', 'token1_usd_rate']], on='token1_index', how='left')
+    
+#     # set MUSD and upMUSD rate to 1.0
+#     df_result.loc[df_result['token0'].isin(self.MEZO_STABLES), 'token0_usd_rate'] = 1.0
+#     df_result.loc[df_result['token1'].isin(self.MEZO_STABLES), 'token1_usd_rate'] = 1.0
+    
+#     # Convert other amount columns to USD
+#     for col_base in ['totalVolume', 'amount']:
+#         for token_num in ['0', '1']:
+#             # Generate all possible column variations
+#             suffixes = ['', 'In', 'Out']
+#             for suffix in suffixes:
+#                 col_name = f'{col_base}{token_num}{suffix}'
+#                 if col_name in df_result.columns:
+#                     df_result[col_name] = pd.to_numeric(df_result[col_name], errors='coerce').fillna(0)
+#                     df_result[f'{col_name}_usd'] = df_result[col_name] * df_result[f'token{token_num}_usd_rate']
+    
+#     return df_result
+
+# def format_musd_currency_columns(df, cols):
+#     df[cols] = df[cols].apply(lambda col: pd.to_numeric(col, errors='coerce').apply(
+#         lambda x: (x / 1e18)
+#     ))
+#     return df
