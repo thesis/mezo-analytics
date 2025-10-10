@@ -98,7 +98,13 @@ MEZO_TOKEN_ADDRESSES = {
     '0xdF708431162Ba247dDaE362D2c919e0fbAfcf9DE': 'xSolvBTC',
     '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
     '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'MUSD',
-    '0x221B2D9aD7B994861Af3f4c8A80c86C4aa86Bf53': 'upMUSD'
+    '0x221B2D9aD7B994861Af3f4c8A80c86C4aa86Bf53': 'upMUSD',
+    '0xaaC423eDC4E3ee9ef81517e8093d52737165b71F': 'T', 
+    '0x29fA8F46CBB9562b87773c8f50a7F9F27178261c': 'swBTC',
+    '0x1531b6e3d51BF80f634957dF81A990B92dA4b154': 'DAI',
+    '0x812fcC0Bb8C207Fd8D6165a7a1173037F43B2dB8': 'FBTC',
+    '0xdf6542260a9F768f07030E4895083F804241F4C4': 'USDe',
+    '0x6a7CD8E1384d49f502b4A4CE9aC9eb320835c5d7': 'cbBTC'
 }
 
 TIGRIS_MAP = {
@@ -113,16 +119,19 @@ TIGRIS_MAP = {
     'Volatile AMM - BTC/mUSDT': 'btc_musdt_pool',
     'Volatile AMM - MUSD/mxSolvBTC': 'musd_xsolvbtc_pool',
     'Stable AMM - BTC/mSolvBTC': 'btc_solvbtc_pool',
-    'Volatile AMM - upMUSD/BTC': 'upmusd_btc_pool'
+    'Volatile AMM - upMUSD/BTC': 'upmusd_btc_pool',
+    'Volatile AMM - mT/MUSD': 'mt_musd_pool'
 
 }
 
 MEZO_ASSET_NAMES_MAP = {
-    'mUSDC': 'USDC', 
+    'mUSDC': 'USDC',
     'mUSDT': 'USDT',
     'mxSolvBTC': 'xSolvBTC',
-    'mSolvBTC': 'SolvBTC'
+    'mSolvBTC': 'SolvBTC',
+    'mT': 'T'
 }
+
 MUSD_MARKET_MAP = {
     '0x28D351135955bc98f6C62535e6816399134e6506' : 'Brink',
     '0x77DCB767ae72d6aff6B8C20c2a76C6f66A5Cb46c' : 'SheFi',
