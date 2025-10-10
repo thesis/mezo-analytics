@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import requests
-from mezo.currency_utils import format_musd_currency_columns, get_token_price
+from mezo.currency_utils import Conversions, get_token_price
 from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
 from mezo.clients import BigQueryClient, SubgraphClient
@@ -18,19 +18,22 @@ from mezo.test_utils import tests
 @with_progress("Cleaning loan data")
 def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     """Clean and format loan data."""
+    conversions = Conversions()
     if not ExceptionHandler.validate_dataframe(raw, "Raw loan data", [sort_col]):
         raise ValueError("Invalid input data for cleaning")
     
     df = raw.copy().sort_values(by=sort_col, ascending=False)
     df = format_datetimes(df, date_cols)
-    df = format_musd_currency_columns(df, currency_cols)
+    df = conversions.format_token_decimals(df, amount_cols=currency_cols)
+    # df = format_musd_currency_columns(df, currency_cols)
     df['count'] = 1
     return df
 
 @with_progress("Calculating collateralization ratios")
 def find_coll_ratio(df, token_id):
     """Computes the collateralization ratio"""
-    usd = get_token_price(token_id)
+    conversions = Conversions()
+    usd = conversions.get_token_price(token_id)
     df['coll_usd'] = df['coll'] * usd
     df['coll_ratio'] = (df['coll_usd']/df['principal']).fillna(0)
     return df
@@ -213,33 +216,8 @@ def process_loan_adjustments(adjusted_loans):
 @with_progress("Fetching MUSD token data")
 def fetch_musd_token_data():
     """Fetch MUSD token transfers and metadata"""
-    # def fetch_data(endpoint: str) -> pd.DataFrame:
-    #     """Fetch data from the specified API endpoint."""
-    #     base_url = 'http://api.explorer.mezo.org/api/v2/'
-    #     url = f"{base_url}/{endpoint}"
-    #     all_data = []
-    #     next_page_params = None
-    #     timeout = 10
-        
-    #     while True:
-    #         response = requests.get(url, params=next_page_params or {}, timeout=timeout)
-    #         if response.status_code != 200:
-    #             raise Exception(f"Failed to fetch data: {response.status_code}")
-
-    #         data = response.json()
-    #         items = data.get('items', [])
-    #         if not items:
-    #             break
-
-    #         all_data.append(pd.json_normalize(items))
-    #         next_page_params = data.get("next_page_params")
-    #         if not next_page_params:
-    #             break
-
-    #     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-
     musd_token_address = '0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186'
-    # musd_transfers = fetch_data(f'tokens/{musd_token_address}/transfers')
+    conversions = Conversions()
 
     # Get holder data
     base_url = 'http://api.explorer.mezo.org/api/v2/tokens/'
@@ -262,7 +240,8 @@ def fetch_musd_token_data():
                            'token_holders_count', 'transfers_count']]
     musd_token['timestamp'] = datetime.now()
 
-    format_musd_currency_columns(musd_token, ['total_supply'])
+    # format_musd_currency_columns(musd_token, ['total_supply'])
+    musd_token = conversions.format_token_decimals(musd_token, amount_cols=['total_supply'])
     musd_token = musd_token.fillna(0)
     
     return musd_token
@@ -303,6 +282,8 @@ def create_risk_distribution(df, risk_col):
 
 def main(test_mode=False, sample_size=False, skip_bigquery=False):
     ProgressIndicators.print_header("MUSD DATA PROCESSING PIPELINE")
+
+    conversions = Conversions()
 
     if test_mode:
         print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
@@ -466,7 +447,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         final_daily_musd = create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans)
         daily_mints_and_burns = create_daily_token_data(mints, burns)
         risk_distribution = create_risk_distribution(latest_open_loans, 'liquidation_buffer')
-        btc_price = get_token_price('bitcoin')
+        btc_price = conversions.get_token_price('bitcoin')
         musd_token = fetch_musd_token_data()
 
         ProgressIndicators.print_step("Uploading daily loans data to BigQuery", "start")
