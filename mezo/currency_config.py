@@ -67,7 +67,8 @@ POOLS_MAP = {
     '0x9e60cd4d5b718178fab0137200a36a5472191302': 'btc_musdt_pool',
     '0xb7fd1db5228e4d9f4109c5635f66375e5af0d8f5': 'musd_xsolvbtc_pool',
     '0xf6f950485b0a65828f07581ca979ef1271778d6a': 'btc_solvbtc_pool',
-    '0xfbcc89586780ac6f41e9cec97663e5592be41331': 'upmusd_btc_pool'
+    '0xfbcc89586780ac6f41e9cec97663e5592be41331': 'upmusd_btc_pool',
+    '0x58b18C64F0483D6b742c54C23B625c65F7A0974d': 't_musd_pool'
 }
 
 POOL_TOKEN0_MAP = {
@@ -88,7 +89,8 @@ POOL_TOKEN_PAIRS = {
     '0xb07c2172c4b7bbc3ac52088d30cb103853b0b403': {'token0': 'USDC', 'token1': 'BTC'},
     '0xb7fd1db5228e4d9f4109c5635f66375e5af0d8f5': {'token0': 'MUSD', 'token1': 'xSolvBTC'},
     '0xf6f950485b0a65828f07581ca979ef1271778d6a': {'token0': 'BTC', 'token1': 'SolvBTC'},
-    '0xfbcc89586780ac6f41e9cec97663e5592be41331': {'token0': 'upMUSD', 'token1': 'BTC'}
+    '0xfbcc89586780ac6f41e9cec97663e5592be41331': {'token0': 'upMUSD', 'token1': 'BTC'},
+    '0x58b18C64F0483D6b742c54C23B625c65F7A0974d': {'token0': 'T', 'token1': 'MUSD'}
 }
 
 MEZO_TOKEN_ADDRESSES = {
@@ -120,7 +122,7 @@ TIGRIS_MAP = {
     'Volatile AMM - MUSD/mxSolvBTC': 'musd_xsolvbtc_pool',
     'Stable AMM - BTC/mSolvBTC': 'btc_solvbtc_pool',
     'Volatile AMM - upMUSD/BTC': 'upmusd_btc_pool',
-    'Volatile AMM - mT/MUSD': 'mt_musd_pool'
+    'Volatile AMM - mT/MUSD': 't_musd_pool'
 
 }
 
