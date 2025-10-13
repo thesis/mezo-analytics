@@ -1,11 +1,14 @@
 from dotenv import load_dotenv
 import pandas as pd
 from datetime import datetime
-import os
 import requests
-from mezo.currency_utils import format_musd_currency_columns, get_token_price
+from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import add_rolling_values, add_pct_change_columns, add_cumulative_columns
+from mezo.data_utils import (
+    add_rolling_values, 
+    add_pct_change_columns, 
+    add_cumulative_columns
+)
 from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import MUSDQueries
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
@@ -18,19 +21,23 @@ from mezo.test_utils import tests
 @with_progress("Cleaning loan data")
 def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     """Clean and format loan data."""
+    cv = Conversions()
+
     if not ExceptionHandler.validate_dataframe(raw, "Raw loan data", [sort_col]):
         raise ValueError("Invalid input data for cleaning")
     
     df = raw.copy().sort_values(by=sort_col, ascending=False)
     df = format_datetimes(df, date_cols)
-    df = format_musd_currency_columns(df, currency_cols)
+    df = cv.format_token_decimals(df, currency_cols)
     df['count'] = 1
     return df
 
 @with_progress("Calculating collateralization ratios")
 def find_coll_ratio(df, token_id):
     """Computes the collateralization ratio"""
-    usd = get_token_price(token_id)
+    cv = Conversions()
+
+    usd = cv.get_token_price(token_id)
     df['coll_usd'] = df['coll'] * usd
     df['coll_ratio'] = (df['coll_usd']/df['principal']).fillna(0)
     return df
@@ -60,14 +67,8 @@ def process_liquidation_data(liquidations, troves_liquidated):
     )
 
     liquidation_df_merged = liquidation_df_merged[
-        ['timestamp__x', 
-        'liquidatedPrincipal', 
-        'liquidatedInterest', 
-        'liquidatedColl', 
-        'borrower',
-        'transactionHash_',
-        'count_x'
-        ]
+        ['timestamp__x', 'liquidatedPrincipal', 'liquidatedInterest', 
+        'liquidatedColl', 'borrower', 'transactionHash_', 'count_x']
     ]
 
     liquidations_df_final = liquidation_df_merged.rename(
@@ -120,9 +121,7 @@ def create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans
     ).reset_index()
 
     daily_balances = daily_balances.rename(
-        columns={'musd': 'net_musd', 
-                 'interest': 'net_interest',
-                 'collateral': 'net_coll'}
+        columns={'musd': 'net_musd', 'interest': 'net_interest', 'collateral': 'net_coll'}
     )
 
     daily_loans_merged = pd.merge(daily_loan_data, daily_balances, how='outer', on='timestamp_')
@@ -178,25 +177,25 @@ def process_loan_adjustments(adjusted_loans):
     )
 
     # Loan increases
-    increased_loans = adjusted_loans_merged[adjusted_loans_merged['principal'] 
-                                            > adjusted_loans_merged['principal_initial']].copy()
+    increased_loans = adjusted_loans_merged[
+        adjusted_loans_merged['principal'] > adjusted_loans_merged['principal_initial']].copy()
     increased_loans['type'] = 1
 
     # Collateral changes
-    coll_increased = adjusted_loans_merged[adjusted_loans_merged['coll'] 
-                                           > adjusted_loans_merged['coll_initial']].copy()
+    coll_increased = adjusted_loans_merged[
+        adjusted_loans_merged['coll'] > adjusted_loans_merged['coll_initial']].copy()
     coll_increased['type'] = 2
 
-    coll_decreased = adjusted_loans_merged[adjusted_loans_merged['coll'] 
-                                           < adjusted_loans_merged['coll_initial']].copy()
+    coll_decreased = adjusted_loans_merged[
+        adjusted_loans_merged['coll'] < adjusted_loans_merged['coll_initial']].copy()
     coll_decreased['type'] = 3
 
     # MUSD Repayments
-    principal_decreased = adjusted_loans_merged[adjusted_loans_merged['principal'] 
-                                                < adjusted_loans_merged['principal_initial']].copy()
+    principal_decreased = adjusted_loans_merged[
+        adjusted_loans_merged['principal'] < adjusted_loans_merged['principal_initial']].copy()
     principal_decreased['type'] = 4
 
-    # Create final_adjusted_loans dataframe with type column
+    # final_adjusted_loans dataframe with type column
     final_adjusted_loans = pd.concat([
         increased_loans,
         coll_increased,
@@ -204,44 +203,16 @@ def process_loan_adjustments(adjusted_loans):
         principal_decreased
     ], ignore_index=True)
 
-    # Create composite unique identifier to handle cases where same transaction
-    # appears in multiple categories (e.g., both principal and collateral increase)
-    # final_adjusted_loans['composite_id'] = final_adjusted_loans['transactionHash_'] + '_' + final_adjusted_loans['type'].astype(str)
-
     return final_adjusted_loans
 
 @with_progress("Fetching MUSD token data")
 def fetch_musd_token_data():
     """Fetch MUSD token transfers and metadata"""
-    # def fetch_data(endpoint: str) -> pd.DataFrame:
-    #     """Fetch data from the specified API endpoint."""
-    #     base_url = 'http://api.explorer.mezo.org/api/v2/'
-    #     url = f"{base_url}/{endpoint}"
-    #     all_data = []
-    #     next_page_params = None
-    #     timeout = 10
-        
-    #     while True:
-    #         response = requests.get(url, params=next_page_params or {}, timeout=timeout)
-    #         if response.status_code != 200:
-    #             raise Exception(f"Failed to fetch data: {response.status_code}")
-
-    #         data = response.json()
-    #         items = data.get('items', [])
-    #         if not items:
-    #             break
-
-    #         all_data.append(pd.json_normalize(items))
-    #         next_page_params = data.get("next_page_params")
-    #         if not next_page_params:
-    #             break
-
-    #     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-
+    
+    cv = Conversions()
     musd_token_address = '0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186'
-    # musd_transfers = fetch_data(f'tokens/{musd_token_address}/transfers')
 
-    # Get holder data
+    # gets holder data
     base_url = 'http://api.explorer.mezo.org/api/v2/tokens/'
     url = f'{base_url}{musd_token_address}/counters'
     response = requests.get(url, timeout=10)
@@ -249,7 +220,7 @@ def fetch_musd_token_data():
     dat = pd.json_normalize(data)
     musd_holders = pd.DataFrame(dat)
 
-    # Get token data
+    # gets token data
     url2 = f'{base_url}{musd_token_address}/'
     response = requests.get(url2, timeout=10)
     data2 = response.json()
@@ -257,12 +228,12 @@ def fetch_musd_token_data():
     musd_token_data = pd.DataFrame(dat2)
 
     musd_token = pd.merge(musd_token_data, musd_holders, how='cross')
-    musd_token = musd_token[['circulating_market_cap', 'exchange_rate', 
-                           'holders', 'total_supply', 'volume_24h', 
-                           'token_holders_count', 'transfers_count']]
+    musd_token = musd_token[
+        ['circulating_market_cap', 'exchange_rate', 'holders', 
+         'total_supply', 'volume_24h', 'token_holders_count', 'transfers_count']
+    ]
     musd_token['timestamp'] = datetime.now()
-
-    format_musd_currency_columns(musd_token, ['total_supply'])
+    musd_token = cv.format_token_decimals(musd_token, ['total_supply'])
     musd_token = musd_token.fillna(0)
     
     return musd_token
@@ -289,20 +260,22 @@ def create_risk_distribution(df, risk_col):
         labels=['Critical', 'High', 'Medium', 'Low']
     )
     
-    # Distribution analysis
+    # distribution analysis
     risk_distribution = df.groupby('risk_category', observed=False).agg({
         'principal': ['count', 'sum'],
         'coll': 'sum',
         'liquidation_buffer': 'mean'
-    }).reset_index()
+        }
+    ).reset_index()
 
-    risk_distribution.columns = ['_'.join(col).strip() 
-                                 for col in risk_distribution.columns.values]
+    risk_distribution.columns = ['_'.join(col).strip() for col in risk_distribution.columns.values]
 
     return risk_distribution
 
 def main(test_mode=False, sample_size=False, skip_bigquery=False):
     ProgressIndicators.print_header("MUSD DATA PROCESSING PIPELINE")
+
+    cv = Conversions()
 
     if test_mode:
         print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
@@ -313,11 +286,8 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         print(f"{'─' * 60}\n")
 
     try:
-
-        ProgressIndicators.print_step("Loading environment variables", "start")
+        
         load_dotenv(dotenv_path='../.env', override=True)
-        COINGECKO_KEY = os.getenv('COINGECKO_KEY')
-        ProgressIndicators.print_step("Environment loaded successfully", "success")
 
         if not skip_bigquery:
             ProgressIndicators.print_step("Initializing BigQuery", "start")
@@ -328,13 +298,48 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
     # fetch raw data + upload to bigquery
     # ==================================================
         subgraph_data = [
-            ('raw_loans', 'loans', SubgraphClient.BORROWER_OPS_SUBGRAPH, MUSDQueries.GET_LOANS, 'troveUpdateds'),
-            ('raw_liquidations', 'liquidations', SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, MUSDQueries.GET_MUSD_LIQUIDATIONS, 'liquidations'),
-            ('raw_troves_liquidated', 'liquidated troves', SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, MUSDQueries.GET_LIQUIDATED_TROVES, 'troveLiquidateds'),
-            ('raw_redemptions', 'redemptions', SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, MUSDQueries.GET_REDEMPTIONS, 'redemptions'),
-            ('raw_fees', 'borrow fees', SubgraphClient.BORROWER_OPS_SUBGRAPH, MUSDQueries.GET_BORROW_FEES, 'borrowingFeePaids'),
-            ('raw_mints', 'MUSD mints', SubgraphClient.MUSD_TOKEN_SUBGRAPH, MUSDQueries.GET_MUSD_MINTS, 'transfers'),
-            ('raw_burns', 'MUSD burns', SubgraphClient.MUSD_TOKEN_SUBGRAPH, MUSDQueries.GET_MUSD_BURNS, 'transfers')
+            (
+                'raw_loans', 'loans', 
+                SubgraphClient.BORROWER_OPS_SUBGRAPH, 
+                MUSDQueries.GET_LOANS, 
+                'troveUpdateds'
+            ),
+            (
+                'raw_liquidations', 'liquidations', 
+                SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
+                MUSDQueries.GET_MUSD_LIQUIDATIONS, 
+                'liquidations'
+            ),
+            (
+                'raw_troves_liquidated', 'liquidated troves', 
+                SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
+                MUSDQueries.GET_LIQUIDATED_TROVES, 
+                'troveLiquidateds'
+            ),
+            (
+                'raw_redemptions', 'redemptions', 
+                SubgraphClient.MUSD_TROVE_MANAGER_SUBGRAPH, 
+                MUSDQueries.GET_REDEMPTIONS, 
+                'redemptions'
+            ),
+            (
+                'raw_fees', 'borrow fees', 
+                SubgraphClient.BORROWER_OPS_SUBGRAPH, 
+                MUSDQueries.GET_BORROW_FEES, 
+                'borrowingFeePaids'
+            ),
+            (
+                'raw_mints', 'MUSD mints', 
+                SubgraphClient.MUSD_TOKEN_SUBGRAPH, 
+                MUSDQueries.GET_MUSD_MINTS, 
+                'transfers'
+            ),
+            (
+                'raw_burns', 'MUSD burns', 
+                SubgraphClient.MUSD_TOKEN_SUBGRAPH, 
+                MUSDQueries.GET_MUSD_BURNS, 
+                'transfers'
+            )
         ]
 
         data_results = {}
@@ -354,140 +359,123 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
 
         ProgressIndicators.print_step("Raw data fetched successfully", "success")
         
-        ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
-        raw_datasets_to_upload = [
-            (raw_loans, 'musd_loans_raw', 'transactionHash_'),
-            (raw_liquidations, 'musd_liquidations_raw', 'transactionHash_'),
-            (raw_troves_liquidated, 'musd_troves_liquidated_raw', 'transactionHash_'),
-            (raw_redemptions, 'musd_redemptions_raw', 'transactionHash_'),
-            (raw_fees, 'musd_fees_raw', 'transactionHash_'),
-            (raw_mints, 'musd_mints_raw', 'transactionHash_'),
-            (raw_burns, 'musd_burns_raw', 'transactionHash_')
-        ]
+        if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading raw data to BigQuery", "start")
+            raw_datasets_to_upload = [
+                (raw_loans, 'musd_loans_raw', 'transactionHash_'),
+                (raw_liquidations, 'musd_liquidations_raw', 'transactionHash_'),
+                (raw_troves_liquidated, 'musd_troves_liquidated_raw', 'transactionHash_'),
+                (raw_redemptions, 'musd_redemptions_raw', 'transactionHash_'),
+                (raw_fees, 'musd_fees_raw', 'transactionHash_'),
+                (raw_mints, 'musd_mints_raw', 'transactionHash_'),
+                (raw_burns, 'musd_burns_raw', 'transactionHash_')
+            ]
 
-        for dataset, table_name, id_column in raw_datasets_to_upload:
-            if dataset is not None and len(dataset) > 0:
-                dataset['transactionHash_'] = dataset['transactionHash_'].astype(str)
-                bq.update_table(dataset, 'raw_data', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in raw_datasets_to_upload:
+                if dataset is not None and len(dataset) > 0:
+                    dataset['transactionHash_'] = dataset['transactionHash_'].astype(str)
+                    bq.update_table(dataset, 'raw_data', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # ==================================================
         # Clean and process loan data + upload to bigquery
         # ==================================================
         
-        loans = clean_loan_data(
-            raw_loans,
-            sort_col='timestamp_', 
-            date_cols=['timestamp_'], 
-            currency_cols=['principal', 'coll', 'stake', 'interest']
-        )
-        loans = find_coll_ratio(loans, 'bitcoin')
+        data_to_clean = [
+            ('loans', raw_loans, ['principal', 'coll', 'stake', 'interest']),
+            ('liquidations', raw_liquidations, ['liquidatedPrincipal', 'liquidatedInterest', 'liquidatedColl']),
+            ('troves_liquidated', raw_troves_liquidated, ['debt', 'coll']),
+            ('redemptions', raw_redemptions, ['actualAmount', 'attemptedAmount', 'collateralFee', 'collateralSent']),
+            ('mints', raw_mints, ['value']),
+            ('burns', raw_burns, ['value'])
+        ]
 
-        liquidations = clean_loan_data(
-            raw_liquidations,
-            sort_col='timestamp_',
-            date_cols=['timestamp_'],
-            currency_cols=['liquidatedPrincipal', 'liquidatedInterest', 'liquidatedColl']
+        clean_results = {}
+        
+        for name, df, currency_cols in data_to_clean:
+            ProgressIndicators.print_step(f"Cleaning {name} data", "start")
+            clean_results[name] = clean_loan_data(
+                df,
+                sort_col='timestamp_', 
+                date_cols=['timestamp_'], 
+                currency_cols=currency_cols
         )
-        troves_liquidated = clean_loan_data(
-            raw_troves_liquidated,
-            sort_col='timestamp_',
-            date_cols=['timestamp_'],
-            currency_cols=['debt', 'coll']
-        )
+            ProgressIndicators.print_step(f"Cleaned {len(clean_results[name])} in {clean_results[name]}", "success")
+
+        loans = clean_results['loans']
+        liquidations = clean_results['liquidations']
+        troves_liquidated = clean_results['troves_liquidated']
+        redemptions = clean_results['redemptions']
+        mints = clean_results['mints']
+        burns = clean_results['burns']
+        
+        loans = find_coll_ratio(loans, 'bitcoin')
         liquidations_final = process_liquidation_data(liquidations, troves_liquidated)
 
-        redemptions = clean_loan_data(
-            raw_redemptions,
-            sort_col='timestamp_',
-            date_cols=['timestamp_'],
-            currency_cols=['actualAmount', 'attemptedAmount', 'collateralFee', 'collateralSent']
-        )
-        
-        mints = clean_loan_data(
-            raw_mints,
-            sort_col='timestamp_',
-            date_cols=['timestamp_'],
-            currency_cols=['value']
-        )
-        burns = clean_loan_data(
-            raw_burns,
-            sort_col='timestamp_',
-            date_cols=['timestamp_'],
-            currency_cols=['value']
-        )        
-
-        # ==================================================
-        # Create subsets of loans by type of txn + upload to bigquery
-        # ==================================================
-
+        # create loan subsets
         new_loans = get_loans_subset(loans, 0, True)
         closed_loans = get_loans_subset(loans, 1, True)
         adjusted_loans = get_loans_subset(loans, 2, True)
         refinanced_loans = get_loans_subset(loans, 3, True)
 
-        # remove liquidations from adjusted loans
-        liquidated_borrowers = liquidations_final['borrower'].unique()
+        liquidated_borrowers = liquidations_final['borrower'].unique() # remove liquidations from adjusted loans
         adjusted_loans = adjusted_loans[~adjusted_loans['borrower'].isin(liquidated_borrowers)]
 
         latest_loans = loans.drop_duplicates(subset='borrower', keep='first')
         latest_open_loans = get_loans_subset(latest_loans, 1, False) # remove closed loans
         latest_open_loans = latest_open_loans[~latest_open_loans['borrower'].isin(liquidated_borrowers)] # remove liquidated loans
-
-        # calculate loan risk category
-        latest_open_loans = add_loan_risk(latest_open_loans)
-
+        latest_open_loans = add_loan_risk(latest_open_loans) # calculate loan risk category
         final_adjusted_loans = process_loan_adjustments(adjusted_loans)
 
-        ProgressIndicators.print_step("Uploading loan subset data to BigQuery", "start")
+        if not skip_bigquery:
+            ProgressIndicators.print_step("Uploading loan subset data to BigQuery", "start")
 
-        datasets_to_upload = [
-            (loans, 'all_loans_clean', 'transactionHash_'),
-            (new_loans, 'new_loans_clean', 'transactionHash_'),
-            (closed_loans, 'closed_loans_clean', 'transactionHash_'),
-            (latest_open_loans, 'open_loans_clean', 'transactionHash_'),
-            (final_adjusted_loans, 'adjusted_loans_clean', 'transactionHash_'),
-            (liquidations_final, 'liquidated_loans_clean', 'transactionHash_'),
-            (refinanced_loans, 'refinanced_loans_clean', 'transactionHash_'),
-            (redemptions, 'redemptions_clean', 'transactionHash_'),
-            (mints, 'musd_mints_clean', 'transactionHash_'),
-            (burns, 'musd_burns_clean', 'transactionHash_')
-        ]
+            datasets_to_upload = [
+                (loans, 'all_loans_clean', 'transactionHash_'),
+                (new_loans, 'new_loans_clean', 'transactionHash_'),
+                (closed_loans, 'closed_loans_clean', 'transactionHash_'),
+                (latest_open_loans, 'open_loans_clean', 'transactionHash_'),
+                (final_adjusted_loans, 'adjusted_loans_clean', 'transactionHash_'),
+                (liquidations_final, 'liquidated_loans_clean', 'transactionHash_'),
+                (refinanced_loans, 'refinanced_loans_clean', 'transactionHash_'),
+                (redemptions, 'redemptions_clean', 'transactionHash_'),
+                (mints, 'musd_mints_clean', 'transactionHash_'),
+                (burns, 'musd_burns_clean', 'transactionHash_')
+            ]
 
-        for dataset, table_name, id_column in datasets_to_upload:
-            if dataset is not None and len(dataset) > 0:
-                bq.update_table(dataset, 'staging', table_name, id_column)
-                ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
+            for dataset, table_name, id_column in datasets_to_upload:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, 'staging', table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
 
         # ==================================================
         # create daily and aggregated datasets + upload to bigquery
         # ==================================================
 
-        final_daily_musd = create_daily_loan_data(new_loans, closed_loans, adjusted_loans, latest_loans)
+        final_daily_musd = create_daily_loan_data(
+            new_loans, closed_loans, adjusted_loans, latest_loans
+        )
         daily_mints_and_burns = create_daily_token_data(mints, burns)
         risk_distribution = create_risk_distribution(latest_open_loans, 'liquidation_buffer')
-        btc_price = get_token_price('bitcoin')
+        btc_price = cv.get_token_price('bitcoin')
         musd_token = fetch_musd_token_data()
-
-        ProgressIndicators.print_step("Uploading daily loans data to BigQuery", "start")
-        if final_daily_musd is not None and len(final_daily_musd) > 0:
-            bq.update_table(final_daily_musd, 'staging', 'daily_loans_clean', 'date')
-            ProgressIndicators.print_step("Uploaded final_daily_musd to BigQuery", "success")
-
-        ProgressIndicators.print_step("Uploading daily mint and burn data to BigQuery", "start")
-        if daily_mints_and_burns is not None and len(daily_mints_and_burns) > 0:
-            bq.update_table(daily_mints_and_burns, 'marts', 'daily_mints_and_burns', 'timestamp_')
-            ProgressIndicators.print_step("Uploaded daily_mints_and_burns to BigQuery", "success")
         
-        ProgressIndicators.print_step("Uploading token data to BigQuery", "start")
-        if musd_token is not None and len(musd_token) > 0:
-            bq.update_table(musd_token, 'marts', 'm_musd_token', 'timestamp')
-            ProgressIndicators.print_step("Uploaded risk distribution to BigQuery", "success")
-        
-        ProgressIndicators.print_step("Uploading risk distribution to BigQuery", "start")
-        if risk_distribution is not None and len(risk_distribution) > 0:
-            bq.upsert_table_by_id(risk_distribution, 'marts', 'risk_distribution', 'risk_category_')
-            ProgressIndicators.print_step("Uploaded risk distribution to BigQuery", "success")
+        if not skip_bigquery:
+            marts_datasets = [
+                (final_daily_musd, 'marts', 'm_musd_daily_loans', 'date'),
+                (daily_mints_and_burns, 'marts', 'm_musd_daily_mints_and_burns', 'timestamp_'),
+                (musd_token, 'marts', 'm_musd_token', 'timestamp')
+            ]
+
+            for dataset, category, table_name, id_column in marts_datasets:
+                if dataset is not None and len(dataset) > 0:
+                    bq.update_table(dataset, category, table_name, id_column)
+                    ProgressIndicators.print_step(f"Uploaded {table_name} to {category} in BigQuery", "success")
+            
+            ProgressIndicators.print_step("Uploading risk distribution to BigQuery", "start")
+            if risk_distribution is not None and len(risk_distribution) > 0:
+                bq.upsert_table_by_id(risk_distribution, 'marts', 'risk_distribution', 'risk_category_')
+                ProgressIndicators.print_step("Uploaded risk distribution to BigQuery", "success")
 
         # ==================================================
         # calculate and display summary statistics
@@ -499,7 +487,6 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         all_time_musd_loans = new_loans['count'].sum()
         all_time_musd_borrowers = new_loans['borrower'].nunique()
         all_time_closed_loans = closed_loans['count'].sum()
-        all_time_adjustments = adjusted_loans['count'].sum()
 
         open_loans = latest_open_loans['count'].sum()
         liquidated_loans = liquidations_final['count'].sum()
@@ -510,34 +497,37 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         system_debt = latest_open_loans['principal'].sum() + latest_open_loans['interest'].sum()
         TCR = ((system_coll * btc_price) / system_debt) * 100
 
-        musd_summary = pd.DataFrame([{
-            'all_time_musd_borrowed': all_time_musd_borrowed, 
-            'all_time_loans': all_time_musd_loans,
-            'all_time_borrowers': all_time_musd_borrowers, 
-            'system_debt': system_debt, 
-            'system_coll': system_coll,
-            'TCR': TCR, 
-            'open_loans': open_loans,
-            'closed_loans': all_time_closed_loans,
-            'liquidated_loans': liquidated_loans,
-            'interest_liquidated': interest_liquidated,
-            'collateral_liquidated': coll_liquidated
-        }])
+        musd_summary = pd.DataFrame(
+            [
+                {
+                    'all_time_musd_borrowed': all_time_musd_borrowed, 
+                    'all_time_loans': all_time_musd_loans,
+                    'all_time_borrowers': all_time_musd_borrowers, 
+                    'system_debt': system_debt, 
+                    'system_coll': system_coll,
+                    'TCR': TCR, 
+                    'open_loans': open_loans,
+                    'closed_loans': all_time_closed_loans,
+                    'liquidated_loans': liquidated_loans,
+                    'interest_liquidated': interest_liquidated,
+                    'collateral_liquidated': coll_liquidated
+                }
+            ]
+        )
         ProgressIndicators.print_step("Summary statistics calculated", "success")
 
         ProgressIndicators.print_summary_box(
             f"💰 MUSD LOAN SUMMARY STATISTICS 💰",
             {
-                "BTC Price": btc_price,
-                "Total MUSD Borrowed": all_time_musd_borrowed,
-                "Total Loans": all_time_musd_loans,
-                "Unique Borrowers": all_time_musd_borrowers,
-                "Open Loans": open_loans,
-                "System TCR": f"{TCR:.2f}%",
-                "System Debt": system_debt
+                "BTC Price": f'${btc_price: ,.2f}',
+                "Total MUSD Borrowed": f'${all_time_musd_borrowed: ,.2f}',
+                "Total Loans": f'{all_time_musd_loans: ,.0f}',
+                "Unique Borrowers": f'{all_time_musd_borrowers: ,.0f}',
+                "Open Loans": f'{open_loans: ,.2f}',
+                "System TCR": f"{TCR:,.2f}%",
+                "System Debt": f'${system_debt: ,.2f}'
             }
         )
-
         ProgressIndicators.print_header(f"🚀 MUSD PROCESSING COMPLETED SUCCESSFULLY 🚀")
         
         return {
@@ -557,7 +547,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         raise
 
 if __name__ == "__main__":
-    results = main()
+    results = main(skip_bigquery=True)
 
     # results = tests.quick_test(sample_size=500)
     # tests.inspect_data(results)
