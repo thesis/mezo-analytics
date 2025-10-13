@@ -1,10 +1,8 @@
 from dotenv import load_dotenv
 import pandas as pd
-
-# from scripts.get_raw_data import get_subgraph_data, get_all_market_donations, get_all_market_purchases
-from mezo.clients import SupabaseClient, BigQueryClient, SubgraphClient
+from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.datetime_utils import format_datetimes
-from mezo.currency_utils import format_musd_currency_columns
+from mezo.currency_utils import Conversions
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 from mezo.currency_config import MUSD_MARKET_MAP
 from mezo.queries import MUSDQueries
@@ -33,13 +31,15 @@ def replace_market_items(df, col, musd_market_map):
 
 @with_progress("Processing donations data")
 def process_donations_data(donations):
+    conversions = Conversions()
     """Process and format donations data"""
     # Replace recipient addresses with human-readable names
     donations_formatted = replace_market_items(donations, 'recipient', MUSD_MARKET_MAP)
     
     # Format dates and currency amounts
     format_datetimes(donations_formatted, ['timestamp_'])
-    format_musd_currency_columns(donations_formatted, ['amount'])
+    donations_formatted = conversions.format_token_decimals(donations_formatted, amount_cols=['amount'])
+    # format_musd_currency_columns(donations_formatted, ['amount'])
     
     # Rename columns for consistency
     donations_col_map = {
@@ -53,15 +53,16 @@ def process_donations_data(donations):
 
 @with_progress("Processing purchases data")
 def process_purchases_data(purchases):
+    conversions = Conversions()
     """Process and format purchases data"""
     # Replace product IDs with human-readable names
     purchases_formatted = replace_market_items(purchases, 'productId', MUSD_MARKET_MAP)
     
     # Format dates and currency amounts
     format_datetimes(purchases_formatted, ['timestamp_'])
-    format_musd_currency_columns(purchases_formatted, ['price'])
+    purchases_formatted = conversions.format_token_decimals(purchases_formatted, amount_cols=['price'])
+    # format_musd_currency_columns(purchases_formatted, ['price'])
     
-    # Rename columns for consistency
     purchases_col_map = {
         'timestamp_': 'date', 
         'productId': 'item',
@@ -163,31 +164,12 @@ def main():
             f"{ProgressIndicators.COIN} MARKET TRANSACTION SUMMARY {ProgressIndicators.COIN}",
             {
                 "Total Transactions": len(market_transactions_final),
-                "Total Amount": market_transactions_final['amount'].sum(),
+                "Total Amount": f'${market_transactions_final['amount'].sum(): ,.2f}',
                 "Unique Items": market_transactions_final['item'].nunique(),
                 "Unique Wallets": market_transactions_final['wallet'].nunique(),
                 "Date Range": f"{market_transactions_final['date'].min()} to {market_transactions_final['date'].max()}"
             }
         )
-        
-        # Upload to Supabase
-        # ProgressIndicators.print_step("Uploading to Supabase", "start")
-        # supabase = SupabaseClient()
-        
-        # try:
-        #     # Ensure table exists with correct structure
-        #     if supabase.ensure_table_exists_for_dataframe('mainnet_musd_market_txns', market_transactions_final):
-        #         supabase.update_supabase('mainnet_musd_market_txns', market_transactions_final)
-        #         ProgressIndicators.print_step("Data uploaded to Supabase successfully", "success")
-        #     else:
-        #         ProgressIndicators.print_step("Failed to create/verify table mainnet_musd_market_txns", "error")
-        # except Exception as e:
-        #     ProgressIndicators.print_step(f"Failed to upload to Supabase: {str(e)}", "error")
-        #     raise
-        
-        # ProgressIndicators.print_header(f"{ProgressIndicators.ROCKET} MARKET DATA PROCESSING COMPLETED SUCCESSFULLY {ProgressIndicators.ROCKET}")
-        
-        # return market_transactions_final
         
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
