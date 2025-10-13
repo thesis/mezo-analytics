@@ -6,70 +6,29 @@ import numpy as np
 
 from mezo.clients import SubgraphClient, BigQueryClient
 from mezo.queries import BridgeQueries
-from mezo.currency_config import TOKEN_MAP, TOKENS_ID_MAP, TOKEN_TYPE_MAP
+from mezo.currency_config import TOKEN_TYPE_MAP
 from mezo.test_utils import tests
-from mezo.currency_utils import format_currency_columns, replace_token_labels
+from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
-from mezo.currency_utils import get_token_prices
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 
 # ==================================================
 # HELPER FUNCTIONS
 # ==================================================
 
-@with_progress("Converting tokens to USD")
-def add_usd_conversions(df, token_column, tokens_id_map, amount_columns=None):
-    """
-    Add USD price conversions to any token data
-    
-    Args:
-        df: DataFrame containing token data
-        token_column: Name of column containing token identifiers
-        tokens_id_map: Dictionary mapping tokens to CoinGecko IDs
-        amount_columns: List of amount columns to convert, or None for auto-detection
-    
-    Returns:
-        DataFrame with USD conversion columns added
-    """
-    if token_column not in df.columns:
-        raise ValueError(f"Column '{token_column}' not found in DataFrame")
-    
-    # Get token prices
-    prices = get_token_prices()
-    if prices is None or prices.empty:
-        raise ValueError("No token prices received from API")
-    
-    token_usd_prices = prices.T.reset_index()
-    df_result = df.copy()
-    df_result['index'] = df_result[token_column].map(tokens_id_map)
-    
-    df_with_usd = pd.merge(df_result, token_usd_prices, how='left', on='index')
-    
-    # Set MUSD price to 1.0 (1:1 with USD)
-    df_with_usd.loc[df_with_usd[token_column] == 'MUSD', 'usd'] = 1.0
-    
-    # Auto-detect amount columns if not provided
-    if amount_columns is None:
-        amount_columns = [col for col in df.columns if 'amount' in col.lower() and col != 'amount_usd']
-    
-    # Add USD conversion for each amount column
-    for col in amount_columns:
-        if col in df_with_usd.columns:
-            usd_col_name = f"{col}_usd" if not col.endswith('_usd') else col
-            df_with_usd[usd_col_name] = df_with_usd[col] * df_with_usd['usd']
-    
-    return df_with_usd
-
 @with_progress("Cleaning bridge data")
 def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col, txn_type):
     """Clean and format bridge transaction data."""
+    conversions = Conversions()
+    
     if not ExceptionHandler.validate_dataframe(raw, "Raw bridge data", [sort_col]):
         raise ValueError("Invalid input data for cleaning")
     
     df = raw.copy().sort_values(by=sort_col)
-    df = replace_token_labels(df, TOKEN_MAP)
+    df = conversions.replace_token_addresses_with_symbols(df=df)
     df = format_datetimes(df, date_cols)
-    df = format_currency_columns(df, currency_cols, asset_col)
+    df = conversions.format_token_decimals(df, currency_cols, asset_col)
+    # format(df, currency_cols, asset_col)
 
     df['type'] = txn_type
 
@@ -264,7 +223,6 @@ def calculate_daily_metrics_by_token(df: pd.DataFrame):
     
     return daily_by_token.round(2)
 
-# SUMMARY METRICS
 def calculate_summary_metrics_overall(df: pd.DataFrame, daily_df: pd.DataFrame):
     """
     Calculate overall summary statistics
@@ -615,10 +573,10 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     # User metrics
     print("\n👥 USER ACTIVITY:")
     print("-" * 50)
-    print(f"  24h Active Users:    {summary['unique_users_24h']:>8.0f}")
-    print(f"  7d Active Users:     {summary['unique_users_7d']:>8.0f}")
-    print(f"  30d Active Users:    {summary['unique_users_30d']:>8.0f}")
-    print(f"  All-time Users:      {summary['total_unique_users_all_time']:>8.0f}")
+    print(f"  24h Active Users:    {summary['unique_users_24h']:>8,.0f}")
+    print(f"  7d Active Users:     {summary['unique_users_7d']:>8,.0f}")
+    print(f"  30d Active Users:    {summary['unique_users_30d']:>8,.0f}")
+    print(f"  All-time Users:      {summary['total_unique_users_all_time']:>8,.0f}")
     
     # Health indicators
     health = metrics['health_metrics'].iloc[0]
@@ -638,6 +596,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
     """Main function to process bridge transaction data."""
     ProgressIndicators.print_header("BRIDGE DATA PROCESSING PIPELINE")
 
+    conversions = Conversions()
+
     if test_mode:
         print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
         if sample_size:
@@ -645,12 +605,11 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
         if skip_bigquery:
             print(f"{'Skipping BigQuery uploads':^60}")
         print(f"{'─' * 60}\n")
-        path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
 
     try:
         # Load environment variables
         ProgressIndicators.print_step("Loading environment variables", "start")
-        load_dotenv(dotenv_path='../.env', override=True)
+        # load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.5f}'.format
         
         # Load clients
@@ -681,6 +640,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
 
             ProgressIndicators.print_step("Saving CSVs for test mode", "start")
+            
+            path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
             raw_deposits.to_csv(f'{path}/raw_deposits.csv')
             raw_withdrawals.to_csv(f'{path}/raw_withdrawals.csv')
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")        
@@ -718,9 +679,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
                 date_cols=['timestamp_'], currency_cols=['amount'], 
                 asset_col='token', txn_type='deposit'
             )
-            deposits_with_usd = add_usd_conversions(
-                deposits, token_column='token',
-                tokens_id_map=TOKENS_ID_MAP, amount_columns =['amount']
+            deposits_with_usd = conversions.add_usd_conversions(
+                deposits, token_column='token', amount_columns =['amount']
             )
             deposits_clean = deposits_with_usd[[
                 'timestamp_', 'amount', 'token', 'amount_usd',
@@ -735,9 +695,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
                 date_cols=['timestamp_'], currency_cols=['amount'], 
                 asset_col='token', txn_type='withdrawal'
             )
-            withdrawals_with_usd = add_usd_conversions(
-                withdrawals, token_column='token',
-                tokens_id_map=TOKENS_ID_MAP, amount_columns=['amount']
+            withdrawals_with_usd = conversions.add_usd_conversions(
+                withdrawals, token_column='token', amount_columns=['amount']
             )
             bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
             withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
