@@ -611,8 +611,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.5f}'.format
-        
-        # Load clients
+        path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
+
         bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data') 
         # change project ID to 'mezo-data-dev' when testing
 
@@ -622,9 +622,8 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
     # GET RAW BRIDGE DATA
     # ==================================================
     
-        path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
-
         if not test_mode:
+
             ProgressIndicators.print_step("Fetching raw bridge deposit data", "start")
             raw_deposits = SubgraphClient.get_subgraph_data(
                 SubgraphClient.MEZO_BRIDGE_SUBGRAPH,
@@ -647,6 +646,7 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")        
         
         else:
+            
             raw_deposits = pd.read_csv(f'{path}/raw_deposits.csv')
             raw_withdrawals = pd.read_csv(f'{path}/raw_withdrawals.csv')
 
@@ -665,9 +665,9 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
                 if dataset is not None and len(dataset) > 0:
                     bq.update_table(dataset, 'raw_data', table_name, id_column)
                     ProgressIndicators.print_step(f"Uploaded {table_name} to BigQuery", "success")
-                    ProgressIndicators.print_step("Saving CSVs for test mode", "start")
-                    dataset.to_csv(f'{table_name}.csv')
-                    ProgressIndicators.print_step("CSVs saved", "success")
+                    # ProgressIndicators.print_step("Saving CSVs for test mode", "start")
+                    # dataset.to_csv(f'{table_name}.csv')
+                    # ProgressIndicators.print_step("CSVs saved", "success")
 
     # ==================================================
     # CLEAN BRIDGE DEPOSIT + WITHDRAWAL DATA
