@@ -533,7 +533,7 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
         deposits = period_data[period_data['type'] == 'deposit']
         deposit_count = len(deposits)
         deposit_amount_usd = deposits['amount_usd'].sum()
-        print(f"{period_name:<12} {deposit_count:>10,} ${deposit_amount_usd:>18,.0f}")
+        print(f"{period_name:<12} {deposit_count:>10,} {'$':>15}{deposit_amount_usd:,.0f}")
     
     print("\n📤 WITHDRAWALS:")
     print("-" * 50)
@@ -544,7 +544,7 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
         withdrawals = period_data[period_data['type'] == 'withdrawal']
         withdrawal_count = len(withdrawals)
         withdrawal_amount_usd = withdrawals['amount_usd'].sum()
-        print(f"{period_name:<12} {withdrawal_count:>10,} ${withdrawal_amount_usd:>18,.0f}")
+        print(f"{period_name:<12} {withdrawal_count:>10,} {'$':>15}{withdrawal_amount_usd:,.0f}")
     
     print("\n💱 NET FLOW:")
     print("-" * 50)
@@ -558,17 +558,17 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
         net_amount = deposits['amount_usd'].sum() - withdrawals['amount_usd'].sum()
         
         # Add + sign for positive values
-        count_sign = "+" if net_count > 0 else ""
-        amount_sign = "+" if net_amount > 0 else ""
+        # count_sign = "+" if net_count > 0 else " "
+        # amount_sign = "+" if net_amount > 0 else " "
         
-        print(f"{period_name:<12} {count_sign}{net_count:>9,} {amount_sign}${abs(net_amount):>17,.0f}")
+        print(f"{period_name:<12} {net_count:>10,} {'$':>11}{abs(net_amount):,.0f}")
     
     # Top tokens
     print("\n🪙 TOP TOKENS BY VOLUME:")
     print("-" * 50)
     top_tokens = metrics['summary_by_token'].head(5)[['token', 'total_volume', 'volume_share_pct', 'net_flow']]
     for _, row in top_tokens.iterrows():
-        print(f"  {row['token']:<8} ${row['total_volume']:>12,.0f} ({row['volume_share_pct']:>5.1f}%) | Net: ${row['net_flow']:>12,.0f}")
+        print(f"  {row['token']:<8} {'$':>4}{row['total_volume']:>1,.0f} - {row['volume_share_pct']:.1f}{'%':>2} {'|':>2} {'Net: $':<2}{row['net_flow']:,.0f}")
     
     # User metrics
     print("\n👥 USER ACTIVITY:")
@@ -611,7 +611,7 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.5f}'.format
-        path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
+        # path = '/Users/laurenjackson/Desktop/mezo-analytics/tests'
 
         bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data') 
         # change project ID to 'mezo-data-dev' when testing
@@ -641,14 +641,14 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
 
             ProgressIndicators.print_step("Saving CSVs for test mode", "start")
-            raw_deposits.to_csv(f'{path}/raw_deposits.csv')
-            raw_withdrawals.to_csv(f'{path}/raw_withdrawals.csv')
+            raw_deposits.to_csv(f'raw_deposits.csv')
+            raw_withdrawals.to_csv(f'raw_withdrawals.csv')
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")        
         
         else:
             
-            raw_deposits = pd.read_csv(f'{path}/raw_deposits.csv')
-            raw_withdrawals = pd.read_csv(f'{path}/raw_withdrawals.csv')
+            raw_deposits = pd.read_csv(f'raw_deposits.csv')
+            raw_withdrawals = pd.read_csv(f'raw_withdrawals.csv')
 
     # ==========================================================
     # UPLOAD RAW DATA TO BIGQUERY
@@ -672,39 +672,38 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
     # ==================================================
     # CLEAN BRIDGE DEPOSIT + WITHDRAWAL DATA
     # ==================================================
-        if not test_mode:
-            ProgressIndicators.print_step("Processing deposits data", "start")
-            deposits = clean_bridge_data(
-                raw=raw_deposits, sort_col='timestamp_',
-                date_cols=['timestamp_'], currency_cols=['amount'], 
-                asset_col='token', txn_type='deposit'
-            )
-            deposits_with_usd = conversions.add_usd_conversions(
-                deposits, token_column='token', amount_columns =['amount']
-            )
-            deposits_clean = deposits_with_usd[[
-                'timestamp_', 'amount', 'token', 'amount_usd',
-                'recipient', 'transactionHash_', 'type']]
-            deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
-            ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
+        ProgressIndicators.print_step("Processing deposits data", "start")
+        deposits = clean_bridge_data(
+            raw=raw_deposits, sort_col='timestamp_',
+            date_cols=['timestamp_'], currency_cols=['amount'], 
+            asset_col='token', txn_type='deposit'
+        )
+        deposits_with_usd = conversions.add_usd_conversions(
+            deposits, token_column='token', amount_columns =['amount']
+        )
+        deposits_clean = deposits_with_usd[[
+            'timestamp_', 'amount', 'token', 'amount_usd',
+            'recipient', 'transactionHash_', 'type']]
+        deposits_clean = deposits_clean.rename(columns={'recipient': 'depositor'})
+        ProgressIndicators.print_step(f"Processed {len(deposits_clean)} deposit records", "success")
 
-            # clean withdrawals data
-            ProgressIndicators.print_step("Processing withdrawals data", "start")
-            withdrawals = clean_bridge_data(
-                raw_withdrawals, sort_col='timestamp_',
-                date_cols=['timestamp_'], currency_cols=['amount'], 
-                asset_col='token', txn_type='withdrawal'
-            )
-            withdrawals_with_usd = conversions.add_usd_conversions(
-                withdrawals, token_column='token', amount_columns=['amount']
-            )
-            bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
-            withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
-            withdrawals_clean = withdrawals_with_usd[[
-                'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
-                'recipient', 'sender', 'transactionHash_', 'type']]
-            withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
-            ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
+        # clean withdrawals data
+        ProgressIndicators.print_step("Processing withdrawals data", "start")
+        withdrawals = clean_bridge_data(
+            raw_withdrawals, sort_col='timestamp_',
+            date_cols=['timestamp_'], currency_cols=['amount'], 
+            asset_col='token', txn_type='withdrawal'
+        )
+        withdrawals_with_usd = conversions.add_usd_conversions(
+            withdrawals, token_column='token', amount_columns=['amount']
+        )
+        bridge_map = {'0': 'ethereum', '1': 'bitcoin'}
+        withdrawals_with_usd['chain'] = withdrawals_with_usd['chain'].map(bridge_map)
+        withdrawals_clean = withdrawals_with_usd[[
+            'timestamp_', 'amount', 'token', 'amount_usd', 'chain',
+            'recipient', 'sender', 'transactionHash_', 'type']]
+        withdrawals_clean = withdrawals_clean.rename(columns={'sender': 'withdrawer', 'recipient': 'withdraw_recipient'})
+        ProgressIndicators.print_step(f"Processed {len(withdrawals_clean)} withdrawal records", "success")
 
     # ==========================================================
     # UPLOAD CLEAN DEPOSIT + WITHDRAWAL TABLES TO BIGQUERY
