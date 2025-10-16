@@ -1,9 +1,9 @@
 name: Generate Summary Reports
 
 on:
-  schedule:
-    # Generate summary reports daily at 5 AM Eastern (9 AM UTC)
-    - cron: '0 9 * * *'
+  # schedule:
+  #   # Generate summary reports daily at 5 AM Eastern (9 AM UTC)
+  #   - cron: '0 9 * * *'
 
   workflow_dispatch:
     inputs:
