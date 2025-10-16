@@ -12,6 +12,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      run_mezo_users:
+        description: 'Run Mezo users fetching'
+        required: false
+        default: 'true'
+        type: boolean
       run_musd_data:
         description: 'Run MUSD data processing'
         required: false
@@ -80,6 +85,40 @@ jobs:
         echo "🚀 Starting bridge data processing..."
         python scripts/process_bridge_data.py
         echo "✅ Bridge data processing completed"
+
+  fetch-mezo-users:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_mezo_users == 'true')
+
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 👥 Fetch Mezo Users
+      env:
+        SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+        SUPABASE_KEY_PROD: ${{ secrets.SUPABASE_KEY_PROD }}
+        SUPABASE_DATA_URL: ${{ secrets.SUPABASE_DATA_URL }}
+        SUPABASE_DATA_KEY: ${{ secrets.SUPABASE_DATA_KEY }}
+        COINGECKO_KEY: ${{ secrets.COINGECKO_KEY }}
+        GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
+      run: |
+        echo "🚀 Starting Mezo users fetch..."
+        python scripts/fetch_mezo_users.py
+        echo "✅ Mezo users fetch completed"
 
   process-musd-data:
     runs-on: ubuntu-latest
@@ -288,7 +327,7 @@ jobs:
   notify-on-failure:
     runs-on: ubuntu-latest
     if: always() && contains(needs.*.result, 'failure')
-    needs: [process-bridge-data, process-musd-data, process-market-data, process-swaps-data, process-pools-data, process-dapp-data, process-vaults-data]
+    needs: [process-bridge-data, fetch-mezo-users, process-musd-data, process-market-data, process-swaps-data, process-pools-data, process-dapp-data, process-vaults-data]
     
     steps:
     - name: 📱 Discord notification on failure
@@ -297,6 +336,9 @@ jobs:
         FAILED_JOBS=""
         if [[ "${{ needs.process-bridge-data.result }}" == "failure" ]]; then
           FAILED_JOBS="${FAILED_JOBS}• Bridge Data Processing\n"
+        fi
+        if [[ "${{ needs.fetch-mezo-users.result }}" == "failure" ]]; then
+          FAILED_JOBS="${FAILED_JOBS}• Mezo Users Fetch\n"
         fi
         if [[ "${{ needs.process-musd-data.result }}" == "failure" ]]; then
           FAILED_JOBS="${FAILED_JOBS}• MUSD Data Processing\n"
