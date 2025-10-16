@@ -2,8 +2,9 @@ import pandas as pd
 from mezo.clients import SupabaseClient, BigQueryClient
 from mezo.visual_utils import with_progress, ProgressIndicators
 
-supabase = SupabaseClient()
-bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+# ==================================================
+# HELPER FUNCTIONS
+# ==================================================
 
 @with_progress("Processing users with auth IDs")
 def process_users_with_auth_id(df, last_active: None):
@@ -16,19 +17,30 @@ def process_users_with_auth_id(df, last_active: None):
     
     return df
 
-def merge_and_clean_users(users, bridged_users):
+def merge_and_clean_users(users, bridged_users, start_date):
     users_with_bridged_funds = pd.merge(bridged_users, users, how='left', on='address')
     
     users_with_bridged_funds = users_with_bridged_funds.sort_values(by='updated_at', ascending=False)
     users_with_bridged_funds['update_at'] = pd.to_datetime(users_with_bridged_funds['updated_at']).dt.date
     
-    final_df = users_with_bridged_funds.loc[users_with_bridged_funds['updated_at'] >= '2025-07-01'].reset_index()
+    final_df = users_with_bridged_funds.loc[users_with_bridged_funds['updated_at'] >= start_date].reset_index()
 
     return final_df
 
+# ==================================================
+# RUN MAIN FUNCTION
+# ==================================================
 
 def main():
-    ProgressIndicators.print_header("USER DATA PROCESSING")
+    ProgressIndicators.print_header("📌 GET MEZO USER DATA")
+
+    start = '2025-05-28'
+    supabase = SupabaseClient()
+    bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+
+    # ==================================================
+    # LOAD AND CLEAN DATA FROM SUPABASE
+    # ==================================================
 
     ProgressIndicators.print_step("Fetching Supabase tables", "start")
     users = supabase.fetch_table_data('accounts')
@@ -36,14 +48,19 @@ def main():
     ProgressIndicators.print_step("Supabase tables loaded successfully", "success")
 
     ProgressIndicators.print_step("Cleaning user data", "start")
+
     all_users_with_auth_id = process_users_with_auth_id(users, None)
     raw_users = all_users_with_auth_id[['updated_at', 'address', 'evm_address', 'auth_user_id']]
-    start = '2025-07-01'
     users_with_auth_id = process_users_with_auth_id(users, start)
     int_users = users_with_auth_id[['updated_at', 'address', 'evm_address', 'auth_user_id']]
     ProgressIndicators.print_step("User data cleaned", "success")
 
+    # ==================================================
+    # UPLOAD TO BIGQUERY
+    # ==================================================
+
     ProgressIndicators.print_step("Uploading raw_users to BigQuery", "start")
+    
     if raw_users is not None and len(raw_users) > 0:
         bq.update_table(raw_users, 'raw_data', 'mezo_users_raw', 'auth_user_id')
     ProgressIndicators.print_step("Successfully updated mezo_users_raw", "success")
@@ -52,6 +69,10 @@ def main():
     if int_users is not None and len(int_users) > 0:
         bq.update_table(int_users, 'intermediate', 'int_users', 'auth_user_id')
     ProgressIndicators.print_step("Successfully updated int_users", "success")
+
+    # ==================================================
+    # PRINT SUMMARY
+    # ==================================================
 
     total_users = users['address'].count()
     total_users_with_auth_ids = int_users['address'].count()
