@@ -9,6 +9,9 @@ from google.cloud.exceptions import NotFound
 from dotenv import load_dotenv
 from web3 import Web3
 import json
+from typing import List, Dict, Optional
+from datetime import datetime
+
 
 load_dotenv(dotenv_path='../.env', override=True)
 
@@ -95,13 +98,14 @@ class SubgraphClient:
     POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.1.0/gn"
     TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
     WORMHOLE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn'
+    LOLLI_WIT_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/btc-as-erc20-mezo/1.0.0/gn'
 
 class SupabaseClient:
 
-    def __init__(self):
+    def __init__(self, url, key):
         # Fetch credentials for reading data from production database
-        self.url: str = os.getenv("SUPABASE_URL_PROD") 
-        self.key: str = os.getenv("SUPABASE_KEY_PROD")
+        self.url: str = os.getenv(url) 
+        self.key: str = os.getenv(key)
         self.supabase: Client = create_client(self.url, self.key)
 
         # Fetch credentials for inserting data to data science database
@@ -110,9 +114,29 @@ class SupabaseClient:
         self.supabase_insert: Client = create_client(self.insert_url, self.insert_key)
     
     def fetch_table_data(self, table_name) -> pd.DataFrame:
-        response = self.supabase.table(table_name).select("*").execute()
-        data = response.data
-        df = pd.DataFrame(data)
+        """Fetch all rows from a Supabase table with pagination."""
+        all_data = []
+        batch_size = 1000
+        offset = 0
+
+        while True:
+            response = self.supabase.table(table_name).select("*").range(offset, offset + batch_size - 1).execute()
+            data = response.data
+
+            if not data:
+                break
+
+            all_data.extend(data)
+
+            # If we got fewer rows than batch_size, we've reached the end
+            if len(data) < batch_size:
+                break
+
+            offset += batch_size
+            print(f"Fetched {len(all_data)} rows from {table_name}...")
+
+        df = pd.DataFrame(all_data)
+        print(f"✅ Total rows fetched from {table_name}: {len(df)}")
         return df
     
     def fetch_rpc_data(self, function_name, params=None):
@@ -615,18 +639,108 @@ class BigQueryClient:
 class Web3Client:
     """A class to handle direct queries to the blockchain"""
 
-    def __init__(self, contract_name: str):
+    def __init__(self, contract_name: str, rate_limit: float = 0.1):
         self.contract_name = contract_name
         self.node = 'https://mainnet.mezo.public.validationcloud.io/'
         self.w3 = Web3(Web3.HTTPProvider(self.node))
+        self.rate_limit = rate_limit
 
-    def load_abi(self):
-        path_name = f'../mezo/smart_contracts/{self.contract_name}.json'
+        print(f"✓ Connected to Mezo network")
+        print(f"  Latest block: {self.w3.eth.block_number}")
+        print(f"  Rate limit delay: {rate_limit}s between calls")        
+    
+    def _load_abi(self):
+        path_name = f'/Users/laurenjackson/Desktop/mezo-analytics/mezo/smart_contracts/{self.contract_name}.json'
         with open(path_name, "r") as file:
             content = file.read()
         return json.loads(content)
 
     def load_contract(self):
-        json = self.load_abi()
+        json = self._load_abi()
         address = Web3.to_checksum_address(json['address'])
+        
+        print("Contract loaded")
+        print(f"Contract name: {self.contract_name}")
+        print(f"Contract address: {address}")
+
         return self.w3.eth.contract(address=address, abi=json['abi'])
+
+    def get_transaction_fee(self, tx_hash: str, retry_count: int = 3):
+        """
+        get transaction fee details for a given transaction hash
+        returns: dictionary with transaction fee details
+        """
+
+        for attempt in range(retry_count):
+            try:
+                # rate limiting measures
+                if attempt > 0:
+                    backoff_delay = self.rate_limit_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"  Retry {attempt + 1}/{retry_count} after {backoff_delay}s delay...")
+                    time.sleep(backoff_delay)
+                else:
+                    time.sleep(self.rate_limit_delay)
+
+                receipt = self.w3.eth.get_transaction_receipt(tx_hash)
+                time.sleep(self.rate_limit_delay)
+
+                tx = self.w3.eth.get_transaction(tx_hash)
+                time.sleep(self.rate_limit_delay)
+
+                # calculate txn fee
+                gas_used = receipt['gasUsed']
+                gas_price = tx['gasPrice']
+                tx_fee_wei = gas_used * gas_price
+                tx_fee_eth = self.w3.from_wei(tx_fee_wei, 'ether')
+
+                block = self.w3.eth.get_block(receipt['blockNumber'])
+                timestamp = datetime.fromtimestamp(block['timestamp'])
+
+                return {
+                    'transaction_hash': tx_hash,
+                    'block_number': receipt['blockNumber'],
+                    'timestamp': timestamp,
+                    'from_address': receipt['from'],
+                    'to_address': receipt['to'],
+                    'gas_used': gas_used,
+                    'gas_price': gas_price,
+                    'gas_price_gwei': float(self.w3.from_wei(gas_price, 'gwei')),
+                    'transaction_fee_wei': tx_fee_wei,
+                    'transaction_fee_eth': float(tx_fee_eth),
+                    'status': receipt['status']
+                }
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'rate limit' in error_msg or 'too many requests' in error_msg or '429' in error_msg:
+                    if attempt < retry_count - 1:
+                        continue  # Retry
+                    else:
+                        print(f"Rate limit error after {retry_count} retries for {tx_hash}: {str(e)}")
+                        return None
+                else:
+                    print(f"Error fetching fee for {tx_hash}: {str(e)}")
+                    return None
+
+        return None
+
+    def get_fees_for_transactions(self, tx_hashes: List[str]):
+        """
+        get transaction fees for a list of transaction hashes
+        """
+
+        print(f"\n📊 Fetching fees for {len(tx_hashes)} transactions...")
+
+        results = []
+        total = len(tx_hashes)
+
+        for i, tx_hash in enumerate(tx_hashes, 1):
+            if i % 10 == 0 or i == total:
+                print(f"  Processing {i}/{total}...", end='\r')
+
+            fee_data = self.get_transaction_fee(tx_hash)
+            if fee_data:
+                results.append(fee_data)
+
+        print(f"\n✓ Successfully processed {len(results)} transactions")
+
+        return pd.DataFrame(results)
