@@ -3,6 +3,8 @@ from typing import Dict
 from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
+import sys
+import os
 
 from mezo.clients import SubgraphClient, BigQueryClient
 from mezo.queries import BridgeQueries
@@ -11,6 +13,10 @@ from mezo.test_utils import tests
 from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
 from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
+
+# Add reports directory to path for report generation
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from reports.generate_summary_reports import ReportGenerator
 
 # ==================================================
 # HELPER FUNCTIONS
@@ -522,46 +528,85 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
         '30d': df[df['date'] >= current_date - timedelta(days=30)],
         'All-time': df
     }
-    
+
+    # Calculate previous period metrics for % change
+    prev_timeframes = {
+        '24h': df[df['date'] == current_date - timedelta(days=1)],
+        '7d': df[(df['date'] >= current_date - timedelta(days=14)) & (df['date'] < current_date - timedelta(days=7))],
+        '30d': df[(df['date'] >= current_date - timedelta(days=60)) & (df['date'] < current_date - timedelta(days=30))]
+    }
+
     # Print deposit and withdrawal metrics
     print("\n📥 DEPOSITS:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Count':>10} {'Amount':>20}")
-    print("-" * 50)
-    
+    print("-" * 80)
+    print(f"{'Period':<12} {'Count':>10} {'Amount':>20} {'% Change':>15}")
+    print("-" * 80)
+
     for period_name, period_data in timeframes.items():
         deposits = period_data[period_data['type'] == 'deposit']
         deposit_count = len(deposits)
         deposit_amount_usd = deposits['amount_usd'].sum()
-        print(f"{period_name:<12} {deposit_count:>10,} {'$':>15}{deposit_amount_usd:,.0f}")
+
+        # Calculate % change (skip for All-time)
+        pct_change_str = ""
+        if period_name in prev_timeframes:
+            prev_deposits = prev_timeframes[period_name][prev_timeframes[period_name]['type'] == 'deposit']
+            prev_amount = prev_deposits['amount_usd'].sum()
+            if prev_amount > 0:
+                pct_change = ((deposit_amount_usd - prev_amount) / prev_amount) * 100
+                pct_change_str = f"{pct_change:+.1f}%"
+            else:
+                pct_change_str = "N/A"
+
+        print(f"{period_name:<12} {deposit_count:>10,} {'$':>15}{deposit_amount_usd:>1,.0f} {pct_change_str:>15}")
     
     print("\n📤 WITHDRAWALS:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Count':>10} {'Amount':>20}")
-    print("-" * 50)
-    
+    print("-" * 80)
+    print(f"{'Period':<12} {'Count':>10} {'Amount':>20} {'% Change':>15}")
+    print("-" * 80)
+
     for period_name, period_data in timeframes.items():
         withdrawals = period_data[period_data['type'] == 'withdrawal']
         withdrawal_count = len(withdrawals)
         withdrawal_amount_usd = withdrawals['amount_usd'].sum()
-        print(f"{period_name:<12} {withdrawal_count:>10,} {'$':>15}{withdrawal_amount_usd:,.0f}")
+
+        # Calculate % change (skip for All-time)
+        pct_change_str = ""
+        if period_name in prev_timeframes:
+            prev_withdrawals = prev_timeframes[period_name][prev_timeframes[period_name]['type'] == 'withdrawal']
+            prev_amount = prev_withdrawals['amount_usd'].sum()
+            if prev_amount > 0:
+                pct_change = ((withdrawal_amount_usd - prev_amount) / prev_amount) * 100
+                pct_change_str = f"{pct_change:+.1f}%"
+            else:
+                pct_change_str = "N/A"
+
+        print(f"{period_name:<12} {withdrawal_count:>10,} {'$':>15}{withdrawal_amount_usd:>1,.0f} {pct_change_str:>15}")
     
     print("\n💱 NET FLOW:")
-    print("-" * 50)
-    print(f"{'Period':<12} {'Net Count':>10} {'Net Amount':>20}")
-    print("-" * 50)
-    
+    print("-" * 80)
+    print(f"{'Period':<12} {'Net Count':>10} {'Net Amount':>20} {'% Change':>15}")
+    print("-" * 80)
+
     for period_name, period_data in timeframes.items():
         deposits = period_data[period_data['type'] == 'deposit']
         withdrawals = period_data[period_data['type'] == 'withdrawal']
         net_count = len(deposits) - len(withdrawals)
         net_amount = deposits['amount_usd'].sum() - withdrawals['amount_usd'].sum()
-        
-        # Add + sign for positive values
-        # count_sign = "+" if net_count > 0 else " "
-        # amount_sign = "+" if net_amount > 0 else " "
-        
-        print(f"{period_name:<12} {net_count:>10,} {'$':>11}{abs(net_amount):,.0f}")
+
+        # Calculate % change (skip for All-time)
+        pct_change_str = ""
+        if period_name in prev_timeframes:
+            prev_deposits = prev_timeframes[period_name][prev_timeframes[period_name]['type'] == 'deposit']
+            prev_withdrawals = prev_timeframes[period_name][prev_timeframes[period_name]['type'] == 'withdrawal']
+            prev_net_amount = prev_deposits['amount_usd'].sum() - prev_withdrawals['amount_usd'].sum()
+            if abs(prev_net_amount) > 0:
+                pct_change = ((net_amount - prev_net_amount) / abs(prev_net_amount)) * 100
+                pct_change_str = f"{pct_change:+.1f}%"
+            else:
+                pct_change_str = "N/A"
+
+        print(f"{period_name:<12} {net_count:>10,} {'$':>11}{net_amount:>1,.0f} {pct_change_str:>15}")
     
     # Top tokens
     print("\n🪙 TOP TOKENS BY VOLUME:")
@@ -570,13 +615,31 @@ def display_summary(metrics: Dict[str, pd.DataFrame], df: pd.DataFrame):
     for _, row in top_tokens.iterrows():
         print(f"  {row['token']:<8} {'$':>4}{row['total_volume']:>1,.0f} - {row['volume_share_pct']:.1f}{'%':>2} {'|':>2} {'Net: $':<2}{row['net_flow']:,.0f}")
     
-    # User metrics
+    # User metrics with % change
     print("\n👥 USER ACTIVITY:")
-    print("-" * 50)
-    print(f"  24h Active Users:    {summary['unique_users_24h']:>8,.0f}")
-    print(f"  7d Active Users:     {summary['unique_users_7d']:>8,.0f}")
-    print(f"  30d Active Users:    {summary['unique_users_30d']:>8,.0f}")
-    print(f"  All-time Users:      {summary['total_unique_users_all_time']:>8,.0f}")
+    print("-" * 80)
+    print(f"  {'Period':<20} {'Active Users':>15} {'% Change':>15}")
+    print("-" * 80)
+
+    # Calculate user metrics for each period
+    user_metrics = {
+        '24h': (summary['unique_users_24h'],
+                df[df['date'] == current_date - timedelta(days=1)]['depositor'].nunique() +
+                df[df['date'] == current_date - timedelta(days=1)]['withdrawer'].nunique()),
+        '7d': (summary['unique_users_7d'],
+               df[(df['date'] >= current_date - timedelta(days=14)) &
+                  (df['date'] < current_date - timedelta(days=7))].apply(
+                      lambda x: x['depositor'] if pd.notna(x.get('depositor')) else x.get('withdrawer'), axis=1).nunique()),
+        '30d': (summary['unique_users_30d'],
+                df[(df['date'] >= current_date - timedelta(days=60)) &
+                   (df['date'] < current_date - timedelta(days=30))].apply(
+                       lambda x: x['depositor'] if pd.notna(x.get('depositor')) else x.get('withdrawer'), axis=1).nunique())
+    }
+
+    print(f"  {'24h Active Users':<20} {summary['unique_users_24h']:>15,.0f} {f'{((summary["unique_users_24h"] - user_metrics["24h"][1]) / user_metrics["24h"][1] * 100):+.1f}%' if user_metrics['24h'][1] > 0 else 'N/A':>15}")
+    print(f"  {'7d Active Users':<20} {summary['unique_users_7d']:>15,.0f} {f'{((summary["unique_users_7d"] - user_metrics["7d"][1]) / user_metrics["7d"][1] * 100):+.1f}%' if user_metrics['7d'][1] > 0 else 'N/A':>15}")
+    print(f"  {'30d Active Users':<20} {summary['unique_users_30d']:>15,.0f} {f'{((summary["unique_users_30d"] - user_metrics["30d"][1]) / user_metrics["30d"][1] * 100):+.1f}%' if user_metrics['30d'][1] > 0 else 'N/A':>15}")
+    print(f"  {'All-time Users':<20} {summary['total_unique_users_all_time']:>15,.0f} {'':<15}")
     
     # Health indicators
     health = metrics['health_metrics'].iloc[0]
@@ -900,7 +963,19 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
 
         # Display summary
         display_summary(metrics, combined)
-        
+
+        # Generate and save markdown report
+        ProgressIndicators.print_step("Generating markdown report", "start")
+        generator = ReportGenerator()
+        bridge_report = generator.generate_bridge_report(metrics, combined)
+
+        # Save report to file
+        report_filename = f"bridge_report_{datetime.now().strftime('%Y%m%d')}.md"
+        report_path = os.path.join(os.path.dirname(__file__), '..', 'reports', report_filename)
+        with open(report_path, 'w') as f:
+            f.write(bridge_report)
+        ProgressIndicators.print_step(f"Saved markdown report to {report_filename}", "success")
+
         ProgressIndicators.print_header(f"{ProgressIndicators.SUCCESS} BRIDGE DATA PROCESSING COMPLETE")
     
     except Exception as e:
