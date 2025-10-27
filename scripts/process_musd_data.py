@@ -33,12 +33,11 @@ def clean_loan_data(raw, sort_col, date_cols, currency_cols):
     return df
 
 @with_progress("Calculating collateralization ratios")
-def find_coll_ratio(df, token_id):
+def find_coll_ratio(df, btc_price):
     """Computes the collateralization ratio"""
-    cv = Conversions()
-
-    usd = cv.get_token_price(token_id)
-    df['coll_usd'] = df['coll'] * usd
+    # cv = Conversions()
+    # usd = cv.get_token_price(token_id)
+    df['coll_usd'] = df['coll'] * btc_price
     df['coll_ratio'] = (df['coll_usd']/df['principal']).fillna(0)
     return df
 
@@ -288,6 +287,8 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
     try:
         
         load_dotenv(dotenv_path='../.env', override=True)
+        btc_price = cv.get_token_price('bitcoin')
+
 
         if not skip_bigquery:
             ProgressIndicators.print_step("Initializing BigQuery", "start")
@@ -409,7 +410,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         mints = clean_results['mints']
         burns = clean_results['burns']
         
-        loans = find_coll_ratio(loans, 'bitcoin')
+        loans = find_coll_ratio(loans, btc_price)
         liquidations_final = process_liquidation_data(liquidations, troves_liquidated)
 
         # create loan subsets
@@ -457,7 +458,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         )
         daily_mints_and_burns = create_daily_token_data(mints, burns)
         risk_distribution = create_risk_distribution(latest_open_loans, 'liquidation_buffer')
-        btc_price = cv.get_token_price('bitcoin')
+        # btc_price = cv.get_token_price('bitcoin')
         musd_token = fetch_musd_token_data()
         
         if not skip_bigquery:
@@ -547,7 +548,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         raise
 
 if __name__ == "__main__":
-    results = main(skip_bigquery=True)
+    results = main()
 
     # results = tests.quick_test(sample_size=500)
     # tests.inspect_data(results)
