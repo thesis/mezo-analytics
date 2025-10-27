@@ -426,6 +426,25 @@ class BridgeQueries:
     }
   }"""
 
+  GET_LOLLI_WITHDRAWALS = """
+  query lolliWithdrawals($skip: Int!) {
+    transfers(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+      where: {from_contains_nocase: "0xd5bbc2a8f353f75e76e7015b0ed64a9179ddf7cd"}
+    ) {
+      timestamp_
+      value
+      from
+      to
+      transactionHash_
+      block_number
+    }
+  }
+  """
+
 class VaultQueries:
   GET_VAULT_TRANSFERS = """
   query vaultTransfers($skip: Int!) {
