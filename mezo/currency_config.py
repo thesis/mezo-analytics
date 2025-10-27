@@ -34,7 +34,7 @@ TOKEN_TYPE_MAP = {
     'T' : 'ethereum'
 }
 
-TOKENS_ID = 'bitcoin,wrapped-bitcoin,tbtc,ignition-fbtc,solv-btc,solv-protocol-staked-btc,swell-restaked-btc,coinbase-wrapped-btc,lombard-staked-btc,usd-coin,tether,ethena-usde,crvusd,threshold-usd,dai,threshold-network-token'
+TOKENS_ID = 'bitcoin,wrapped-bitcoin,tbtc,ignition-fbtc,solv-btc,solv-protocol-solvbtc-bbn,swell-restaked-btc,coinbase-wrapped-btc,lombard-staked-btc,usd-coin,tether,ethena-usde,crvusd,threshold-usd,dai,threshold-network-token'
 
 TOKENS_ID_MAP = {
     'BTC' : 'bitcoin',
@@ -42,7 +42,7 @@ TOKENS_ID_MAP = {
     'tBTC' : 'tbtc',
     'FBTC' : 'ignition-fbtc',
     'SolvBTC' : 'solv-btc',
-    'xSolvBTC' : 'solv-protocol-staked-btc',
+    'xSolvBTC' : 'solv-protocol-solvbtc-bbn',
     'swBTC' : 'swell-restaked-btc',
     'cbBTC' : 'coinbase-wrapped-btc',
     'LBTC' : 'lombard-staked-btc',
@@ -131,7 +131,12 @@ MEZO_ASSET_NAMES_MAP = {
     'mUSDT': 'USDT',
     'mxSolvBTC': 'xSolvBTC',
     'mSolvBTC': 'SolvBTC',
-    'mT': 'T'
+    'mT': 'T',
+    'mcbBTC': 'cbBTC',
+    'mswBTC': 'swBTC',
+    'mDAI': 'DAI',
+    'mFBTC': 'FBTC',
+    'mUSDe': 'USDe'
 }
 
 MUSD_MARKET_MAP = {
