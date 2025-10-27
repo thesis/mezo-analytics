@@ -132,3 +132,5 @@ df_fees[[
     'gas_used', 'gas_price', 'gas_price_gwei', 
     'transaction_fee_wei', 'transaction_fee_eth'
 ]]
+
+print(df_fees)
