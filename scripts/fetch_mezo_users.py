@@ -1,3 +1,5 @@
+from datetime import date
+from dotenv import load_dotenv
 import pandas as pd
 from mezo.clients import SupabaseClient, BigQueryClient
 from mezo.visual_utils import with_progress, ProgressIndicators
@@ -6,8 +8,8 @@ from mezo.visual_utils import with_progress, ProgressIndicators
 # HELPER FUNCTIONS
 # ==================================================
 
-@with_progress("Processing users with auth IDs")
-def process_users_with_auth_id(df, last_active: None):
+@with_progress("Cleaning user table")
+def clean_users(df, last_active: None):
     df = df.sort_values(by='updated_at', ascending=False)
     df = df.loc[df['auth_user_id'].notna()].reset_index()
 
@@ -15,80 +17,77 @@ def process_users_with_auth_id(df, last_active: None):
         df = df[df['updated_at'] >= last_active].reset_index()
         df['updated_at'] = pd.to_datetime(df['updated_at']).dt.date
     
+    df = df[['updated_at', 'address', 'evm_address', 'auth_user_id', 'has_modified_username', 'metadata']]
+    
     return df
 
-def merge_and_clean_users(users, bridged_users, start_date):
-    users_with_bridged_funds = pd.merge(bridged_users, users, how='left', on='address')
-    
-    users_with_bridged_funds = users_with_bridged_funds.sort_values(by='updated_at', ascending=False)
-    users_with_bridged_funds['update_at'] = pd.to_datetime(users_with_bridged_funds['updated_at']).dt.date
-    
-    final_df = users_with_bridged_funds.loc[users_with_bridged_funds['updated_at'] >= start_date].reset_index()
-
-    return final_df
-
-# ==================================================
-# RUN MAIN FUNCTION
-# ==================================================
-
-def main():
-    ProgressIndicators.print_header("📌 GET MEZO USER DATA")
-
-    start = '2025-05-28'
-    supabase = SupabaseClient()
-    bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
-
-    # ==================================================
-    # LOAD AND CLEAN DATA FROM SUPABASE
-    # ==================================================
-
-    ProgressIndicators.print_step("Fetching Supabase tables", "start")
+@with_progress("Fetching table from Supabase")
+def fetch_users(supabase):
     users = supabase.fetch_table_data('accounts')
-    bridged_users = supabase.fetch_table_data('accounts_with_bridged_funds')
-    ProgressIndicators.print_step("Supabase tables loaded successfully", "success")
 
-    ProgressIndicators.print_step("Cleaning user data", "start")
+    return users
 
-    all_users_with_auth_id = process_users_with_auth_id(users, None)
-    raw_users = all_users_with_auth_id[['updated_at', 'address', 'evm_address', 'auth_user_id']]
-    users_with_auth_id = process_users_with_auth_id(users, start)
-    int_users = users_with_auth_id[['updated_at', 'address', 'evm_address', 'auth_user_id']]
-    ProgressIndicators.print_step("User data cleaned", "success")
+def fetch_btc_users(users):
+    btc_users = users[users['address'].str.startswith('b', na=False)].reset_index()
+    return btc_users
 
-    # ==================================================
-    # UPLOAD TO BIGQUERY
-    # ==================================================
+@with_progress("Saving to csv")
+def save_to_csv(df, name):
+    df.to_csv(f'/Users/laurenjackson/Desktop/mezo-analytics/outputs/{name}_{date.today()}.csv')
 
-    ProgressIndicators.print_step("Uploading raw_users to BigQuery", "start")
-    
-    if raw_users is not None and len(raw_users) > 0:
-        bq.update_table(raw_users, 'raw_data', 'mezo_users_raw', 'auth_user_id')
-    ProgressIndicators.print_step("Successfully updated mezo_users_raw", "success")
+@with_progress("Uploading raw_users to BigQuery")
+def upload_to_bigquery(df, dataset, table, identifier, bq):
+    if df is not None and len(df) > 0:
+        bq.update_table(df, dataset, table, identifier)
 
-    ProgressIndicators.print_step("Uploading int_users to BigQuery", "start")
-    if int_users is not None and len(int_users) > 0:
-        bq.update_table(int_users, 'intermediate', 'int_users', 'auth_user_id')
-    ProgressIndicators.print_step("Successfully updated int_users", "success")
-
-    # ==================================================
-    # PRINT SUMMARY
-    # ==================================================
-
+def print_summary(users, start):
     total_users = users['address'].count()
-    total_users_with_auth_ids = int_users['address'].count()
-    all_time_users_with_auth_ids = raw_users['address'].count()
+    # total_users_with_auth_ids = int_users['address'].count()
+    # all_time_users_with_auth_ids = raw_users['address'].count()
     
     ProgressIndicators.print_summary_box(
         "📊 USERS SUMMARY",
         {
             "Starting date": start,
             "Total users": total_users,
-            "All users with auth IDs": all_time_users_with_auth_ids,
-            "Total users with auth IDs (from start date)": total_users_with_auth_ids
         }
     )
 
+# ==================================================
+# RUN MAIN FUNCTION
+# ==================================================
+
+def main():
+    ProgressIndicators.print_header("📌 GET MEZO USER DATA")    
+    load_dotenv(dotenv_path='../.env', override=True)
+    supabase = SupabaseClient(url='SUPABASE_URL_PROD', key='SUPABASE_KEY_PROD')    
+    bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+
+    # ==================================================
+    # LOAD AND CLEAN DATA FROM SUPABASE
+    # ==================================================
+    start = '2025-05-28' # mainnet launch
+
+    users = fetch_users(supabase)
+    
+    users_stg = clean_users(users, start)
+    save_to_csv(users_stg, 'users')
+
+    btc_users = fetch_btc_users(users)
+    save_to_csv(btc_users, 'btc_users')
+
+    # ==================================================
+    # UPLOAD TO BIGQUERY
+    # ==================================================
+    upload_to_bigquery(users_stg, 'staging', 'mezo_users_stg', 'auth_user_id')
+
+    # ==================================================
+    # PRINT SUMMARY
+    # ==================================================
+    print_summary(users, start)
+    
     ProgressIndicators.print_header("🚀 PROCESSING COMPLETED SUCCESSFULLY 🚀")
+
 
 if __name__ == "__main__":
     results = main()
