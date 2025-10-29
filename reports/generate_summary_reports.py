@@ -20,7 +20,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # import processing scripts that generate summaries
-from scripts.archive.pools_v3 import main as process_pools
+# from scripts.archive.pools_v3 import main as process_pools
 
 # set the linear project id for the data reports project
 LINEAR_PROJECT_ID='8cf7b30b-0031-4f26-b3ad-59828750fce3'
