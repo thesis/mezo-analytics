@@ -25,6 +25,7 @@ include = ["pyproject.toml", "mezo/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
+ignore = ["E501", "W291", "W293"]  # Ignore line-too-long and trailing whitespace
 
 [tool.ruff.lint.isort]
 known-first-party = ["mezo"]
