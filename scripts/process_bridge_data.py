@@ -1,22 +1,24 @@
-from datetime import timedelta, datetime, date
-from typing import Dict
-from dotenv import load_dotenv
-import pandas as pd
-import numpy as np
-import sys
+from datetime import date, datetime, timedelta
 import os
+import sys
+from typing import Dict
 
-from mezo.clients import SubgraphClient, BigQueryClient
-from mezo.queries import BridgeQueries
+from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
+
+from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.currency_config import TOKEN_TYPE_MAP
-from mezo.test_utils import tests
+
+# from mezo.test_utils import tests
 from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
+from mezo.queries import BridgeQueries
+from mezo.visual_utils import ExceptionHandler, ProgressIndicators, with_progress
 
 # Add reports directory to path for report generation
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from reports.generate_summary_reports import ReportGenerator
+# from reports.generate_summary_reports import ReportGenerator
 
 # ==================================================
 # HELPER FUNCTIONS
@@ -173,10 +175,10 @@ def calculate_daily_metrics_overall(df: pd.DataFrame):
     daily['total_transactions'] = daily['deposit_count'] + daily['withdrawal_count']
     daily['total_unique_users'] = daily['unique_depositors'] + daily['unique_withdrawers']
     daily['avg_transaction_size'] = daily['total_volume'] / daily['total_transactions'].replace(0, np.nan)
-    
+
     # Volatility (rolling 7-day standard deviation of daily volumes)
     daily['volume_volatility_7d'] = daily['total_volume'].rolling(window=7, min_periods=1).std()
-    
+
     daily = daily.reset_index()
 
     return daily.round(2)
@@ -399,7 +401,7 @@ def calculate_user_metrics(df: pd.DataFrame):
     
     user_metrics.columns = ['total_volume', 'avg_transaction', 'transaction_count', 
                             'largest_transaction', 'first_activity', 'last_activity', 'activity_breakdown']
-    
+
     # Calculate additional metrics
     user_metrics['days_active'] = (user_metrics['last_activity'] - user_metrics['first_activity']).dt.days
     user_metrics['is_active_30d'] = user_metrics['last_activity'] >= (datetime.now() - timedelta(days=30))
@@ -462,12 +464,11 @@ def calculate_health_indicators(daily_df: pd.DataFrame, df: pd.DataFrame):
         'current_tvl': daily_df['tvl'].iloc[-1],
         'tvl_volatility_30d': daily_df['tvl_change_pct'].iloc[-30:].std() if len(daily_df) >= 30 else 0,
         'max_drawdown_30d': calculate_max_drawdown(daily_df['tvl'].iloc[-30:]) if len(daily_df) >= 30 else 0,
-        
+
         # Flow health
         'consecutive_outflow_days': calculate_consecutive_outflow_days(daily_df),
         'outflow_ratio_7d': daily_df['withdrawal_amount_usd'].iloc[-7:].sum() / 
                             daily_df['deposit_amount_usd'].iloc[-7:].sum() if daily_df['deposit_amount_usd'].iloc[-7:].sum() > 0 else 0,
-        
         # Concentration risk
         'largest_transaction': df['amount_usd'].max(),
         'largest_tx_pct_of_tvl': (df['amount_usd'].max() / daily_df['tvl'].iloc[-1]) * 100 if daily_df['tvl'].iloc[-1] > 0 else 0,
@@ -684,7 +685,7 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
     # ==================================================
     # GET RAW BRIDGE DATA
     # ==================================================
-    
+
         if not test_mode:
 
             ProgressIndicators.print_step("Fetching raw bridge deposit data", "start")
@@ -704,14 +705,14 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")
 
             ProgressIndicators.print_step("Saving CSVs for test mode", "start")
-            raw_deposits.to_csv(f'raw_deposits.csv')
-            raw_withdrawals.to_csv(f'raw_withdrawals.csv')
+            raw_deposits.to_csv('raw_deposits.csv')
+            raw_withdrawals.to_csv('raw_withdrawals.csv')
             ProgressIndicators.print_step(f"Retrieved {len(raw_withdrawals) if raw_withdrawals is not None else 0} withdrawal transactions", "success")        
         
         else:
             
-            raw_deposits = pd.read_csv(f'raw_deposits.csv')
-            raw_withdrawals = pd.read_csv(f'raw_withdrawals.csv')
+            raw_deposits = pd.read_csv('raw_deposits.csv')
+            raw_withdrawals = pd.read_csv('raw_withdrawals.csv')
 
     # ==========================================================
     # UPLOAD RAW DATA TO BIGQUERY
@@ -907,7 +908,7 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
 
         ProgressIndicators.print_step("Create comprehensive bridge metrics dataframes...", "start")
         metrics = calculate_bridge_metrics(combined)
-        ProgressIndicators.print_step(f"Generated comprehensive metrics tables.", "success")
+        ProgressIndicators.print_step("Generated comprehensive metrics tables.", "success")
 
         # Access intermediate dataframes
         user_metrics = metrics['user_metrics']
@@ -965,16 +966,16 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
         display_summary(metrics, combined)
 
         # Generate and save markdown report
-        ProgressIndicators.print_step("Generating markdown report", "start")
-        generator = ReportGenerator()
-        bridge_report = generator.generate_bridge_report(metrics, combined)
+        # ProgressIndicators.print_step("Generating markdown report", "start")
+        # generator = ReportGenerator()
+        # bridge_report = generator.generate_bridge_report(metrics, combined)
 
-        # Save report to file
-        report_filename = f"bridge_report_{datetime.now().strftime('%Y%m%d')}.md"
-        report_path = os.path.join(os.path.dirname(__file__), '..', 'reports', report_filename)
-        with open(report_path, 'w') as f:
-            f.write(bridge_report)
-        ProgressIndicators.print_step(f"Saved markdown report to {report_filename}", "success")
+        # # Save report to file
+        # report_filename = f"bridge_report_{datetime.now().strftime('%Y%m%d')}.md"
+        # report_path = os.path.join(os.path.dirname(__file__), '..', 'reports', report_filename)
+        # with open(report_path, 'w') as f:
+        #     f.write(bridge_report)
+        # ProgressIndicators.print_step(f"Saved markdown report to {report_filename}", "success")
 
         ProgressIndicators.print_header(f"{ProgressIndicators.SUCCESS} BRIDGE DATA PROCESSING COMPLETE")
     
@@ -989,4 +990,4 @@ def main(skip_bigquery=False, sample_size=False, test_mode=False):
         raise
 
 if __name__ == "__main__":
-    results = main()
+    main()
