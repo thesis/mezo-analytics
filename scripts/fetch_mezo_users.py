@@ -1,8 +1,10 @@
 from datetime import date
+
 from dotenv import load_dotenv
 import pandas as pd
-from mezo.clients import SupabaseClient, BigQueryClient
-from mezo.visual_utils import with_progress, ProgressIndicators
+
+from mezo.clients import BigQueryClient, SupabaseClient
+from mezo.visual_utils import ProgressIndicators, with_progress
 
 # ==================================================
 # HELPER FUNCTIONS
@@ -33,9 +35,11 @@ def fetch_btc_users(users):
 
 @with_progress("Saving to csv")
 def save_to_csv(df, name):
-    df.to_csv(f'/Users/laurenjackson/Desktop/mezo-analytics/outputs/{name}_{date.today()}.csv')
+    output_path = f'./outputs/{name}_{date.today()}.csv'
+    df.to_csv(output_path)
+    print(f"Saved CSV to {output_path}")
 
-@with_progress("Uploading raw_users to BigQuery")
+@with_progress("Uploading mezo_users_stg to BigQuery")
 def upload_to_bigquery(df, dataset, table, identifier, bq):
     if df is not None and len(df) > 0:
         bq.update_table(df, dataset, table, identifier)
@@ -63,31 +67,20 @@ def main():
     supabase = SupabaseClient(url='SUPABASE_URL_PROD', key='SUPABASE_KEY_PROD')    
     bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
 
-    # ==================================================
-    # LOAD AND CLEAN DATA FROM SUPABASE
-    # ==================================================
     start = '2025-05-28' # mainnet launch
 
     users = fetch_users(supabase)
-    
     users_stg = clean_users(users, start)
     save_to_csv(users_stg, 'users')
 
     btc_users = fetch_btc_users(users)
     save_to_csv(btc_users, 'btc_users')
 
-    # ==================================================
-    # UPLOAD TO BIGQUERY
-    # ==================================================
-    upload_to_bigquery(users_stg, 'staging', 'mezo_users_stg', 'auth_user_id')
+    upload_to_bigquery(users_stg, 'staging', 'mezo_users_stg', 'auth_user_id', bq)
 
-    # ==================================================
-    # PRINT SUMMARY
-    # ==================================================
     print_summary(users, start)
-    
     ProgressIndicators.print_header("🚀 PROCESSING COMPLETED SUCCESSFULLY 🚀")
 
 
 if __name__ == "__main__":
-    results = main()
+    main()
