@@ -1,17 +1,19 @@
+from datetime import date, datetime, timedelta
+
 from dotenv import load_dotenv
-import pandas as pd
 import numpy as np
-from datetime import datetime, date, timedelta
+import pandas as pd
 
 from mezo.clients import BigQueryClient, SubgraphClient
-from mezo.queries import PoolQueries
+from mezo.currency_config import MEZO_ASSET_NAMES_MAP, POOL_TOKEN_PAIRS, POOLS_MAP, TIGRIS_MAP
 from mezo.currency_utils import Conversions
-from mezo.datetime_utils import format_datetimes
 from mezo.data_utils import flatten_json_column
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
+from mezo.datetime_utils import format_datetimes
+from mezo.queries import PoolQueries
 from mezo.report_utils import save_metrics_snapshot
-from mezo.test_utils import tests
-from mezo.currency_config import POOLS_MAP, POOL_TOKEN_PAIRS, MEZO_ASSET_NAMES_MAP, TIGRIS_MAP
+
+# from mezo.test_utils import tests
+from mezo.visual_utils import ExceptionHandler, ProgressIndicators, with_progress
 
 # ==================================================
 # helper functions
@@ -524,8 +526,8 @@ def calculate_efficiency_metrics(tvl_snapshot, daily_volume, daily_fees):
 # ==================================================
 
 def main(test_mode=False, sample_size=False, skip_bigquery=False):
-    ProgressIndicators.print_header("POOLS DATA PROCESSING PIPELINE")
 
+    ProgressIndicators.print_header("POOLS DATA PROCESSING PIPELINE")
     if test_mode:
         print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
         if sample_size:
@@ -538,6 +540,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         ProgressIndicators.print_step("Loading environment variables", "start")
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.8f}'.format
+        current_date = date.today()
         ProgressIndicators.print_step("Environment loaded successfully", "success")
         
         if not skip_bigquery:
@@ -577,7 +580,6 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         fees_clean = process_fees_data(fees_data)
 
         if test_mode:
-            current_date = date.today()
             print(fees_clean[fees_clean['timestamp'] >=  current_date - timedelta(days=7)])
             print(volume_clean[volume_clean['timestamp'] >=  current_date - timedelta(days=7)])
             print(withdrawals_clean[withdrawals_clean['timestamp_'] >=  current_date - timedelta(days=7)])
@@ -592,9 +594,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         daily_pool_fees, daily_pool_fees_all = calculate_fee_metrics(fees_clean)
         efficiency_metrics = calculate_efficiency_metrics(tvl_snapshot, daily_pool_volume, daily_pool_fees)
 
-        if test_mode:
-            current_date = date.today()
-            
+        if test_mode:            
             snapshots = [
                 (tvl_snapshot, 'm_pools_tvl_snapshot'),
                 (efficiency_metrics, 'm_pools_efficiency')
@@ -724,9 +724,6 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         
         # Save metrics snapshot for report generation
         save_metrics_snapshot(metrics_results, 'pools')
-        
-        print(daily_pool_fees[daily_pool_fees['timestamp'] >=  current_date - timedelta(days=7)])
-        
         ProgressIndicators.print_header("🚀 POOLS PROCESSING COMPLETED SUCCESSFULLY 🚀")
         
         return metrics_results
@@ -734,7 +731,7 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
         ProgressIndicators.print_header("❌ PROCESSING FAILED")
-        print(f"\n📍 Error traceback:")
+        print("\n📍 Error traceback:")
         print(f"{'─' * 50}")
         import traceback
         traceback.print_exc()
