@@ -21,13 +21,17 @@ requires-python = "~=3.13.0"
 [tool.ruff]
 line-length = 99
 src = ["mezo"]
-include = ["pyproject.toml", "mezo/**/*.py"]
+include = ["pyproject.toml", "mezo/**/*.py", "docs/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
-ignore = ["E501", "W291", "W293"]  # Ignore line-too-long and trailing whitespace
+ignore = ["E501", "W291", "W293", "F401", "F811", "F841"]  # Ignore line-too-long, trailing whitespace, unused imports, and unused variables
+
+[tool.ruff.per-file-ignores]
+"**/docs/models/*.py" = ["F401", "F811", "F821", "F841"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mezo"]
 force-sort-within-sections = true
+
 

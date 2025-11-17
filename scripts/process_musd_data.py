@@ -1,18 +1,16 @@
+from datetime import datetime
+
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime
 import requests
-from mezo.currency_utils import Conversions
-from mezo.datetime_utils import format_datetimes
-from mezo.data_utils import (
-    add_rolling_values, 
-    add_pct_change_columns, 
-    add_cumulative_columns
-)
+
 from mezo.clients import BigQueryClient, SubgraphClient
+from mezo.currency_utils import Conversions
+from mezo.data_utils import add_cumulative_columns, add_pct_change_columns, add_rolling_values
+from mezo.datetime_utils import format_datetimes
 from mezo.queries import MUSDQueries
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
 from mezo.test_utils import tests
+from mezo.visual_utils import ExceptionHandler, ProgressIndicators, with_progress
 
 # ==================================================
 # helper functions

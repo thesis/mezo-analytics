@@ -15,6 +15,7 @@ python-dotenv>=1.0.0
 
 # Database and API clients
 db-dtypes>=1.4.0
+dune-client>=1.9.3
 google-api-core>=2.20.0
 google-auth>=2.30.0
 google-cloud-bigquery>=3.30.0

@@ -1,14 +1,17 @@
+from datetime import datetime
+
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime
+
+from mezo.clients import BigQueryClient, SubgraphClient
+from mezo.currency_config import POOL_TOKEN_PAIRS, POOLS_MAP
 from mezo.currency_utils import Conversions
 from mezo.datetime_utils import format_datetimes
-from mezo.clients import BigQueryClient, SubgraphClient
 from mezo.queries import MUSDQueries
-from mezo.test_utils import tests
 from mezo.report_utils import save_metrics_snapshot
-from mezo.currency_config import POOL_TOKEN_PAIRS, POOLS_MAP
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
+
+# from mezo.test_utils import tests
+from mezo.visual_utils import ExceptionHandler, ProgressIndicators, with_progress
 
 ################################################
 # HELPER FUNCTIONS
@@ -27,14 +30,6 @@ def clean_swap_and_fee_data(raw):
     df = format_datetimes(df, ['timestamp_'])
     df = conv.map_pool_to_tokens(df, pool_column='contractId_', pool_token_mapping=POOL_TOKEN_PAIRS)
 
-    # determine which amount columns to process based on swap flag
-    # if swap:
-    #     amount0_cols = [col for col in df.columns if col.startswith('amount0') and col in ['amount0In', 'amount0Out']]
-    #     amount1_cols = [col for col in df.columns if col.startswith('amount1') and col in ['amount1In', 'amount1Out']]
-    # else:
-    #     amount0_cols = ['amount0']
-    #     amount1_cols = ['amount1']
-    
     amount0_cols = [col for col in df.columns if col.startswith(('amount0'))]
     amount1_cols = [col for col in df.columns if col.startswith(('amount1'))]
 
@@ -107,7 +102,7 @@ def get_daily_swaps_by_pool(df):
 
 @with_progress("Aggregating pool-level metrics")
 def get_swaps_by_pool(df):
-    """Aggregate swap data by pool"""
+    """Aggregate swap data by pool, ensuring all pools from POOLS_MAP are included"""
     pool_metrics = df.groupby('pool').agg(
         total_volume=('total_volume', 'sum'),
         total_fees=('total_fees', 'sum'),
@@ -115,6 +110,23 @@ def get_swaps_by_pool(df):
         users=('user', 'nunique'),
         avg_swap_size=('total_volume', 'mean')
     ).reset_index()
+    
+    # Ensure all pools from POOLS_MAP are included, even if they have no swaps
+    all_pools = set(POOLS_MAP.values())
+    existing_pools = set(pool_metrics['pool'].unique())
+    missing_pools = all_pools - existing_pools
+    
+    if missing_pools:
+        # Create rows for pools with no swaps (zero values)
+        missing_rows = pd.DataFrame({
+            'pool': list(missing_pools),
+            'total_volume': 0.0,
+            'total_fees': 0.0,
+            'swap_count': 0,
+            'users': 0,
+            'avg_swap_size': 0.0
+        })
+        pool_metrics = pd.concat([pool_metrics, missing_rows], ignore_index=True)
     
     pool_metrics = pool_metrics.sort_values('total_volume', ascending=False)
     
@@ -258,9 +270,11 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             ProgressIndicators.print_step("Uploading clean data to BigQuery", "start")
 
             clean_datasets = [
-                (swaps_df_clean, 'swaps_clean', 'transactionHash_'),
-                (fees_df_clean, 'swap_fees_clean', 'transactionHash_')
+                (swaps_df_clean, 'stg_swaps_clean', 'transactionHash_'),
+                (fees_df_clean, 'stg_swap_fees_clean', 'transactionHash_')
             ]
+
+            print(fees_df_clean['pool'].unique())
 
             for dataset, table_name, id_column in clean_datasets:
                 if dataset is not None and len(dataset) > 0:
@@ -279,6 +293,8 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
             on='transactionHash_',
             suffixes=('', '_fee')
         )
+
+        print(swaps_with_fees['pool'].unique())
 
         # Select and rename columns for clarity
         col_map = {
@@ -319,14 +335,20 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         pool_daily_metrics = create_swaps_daily_metrics(swaps_final)
         summary_metrics = create_summary_metrics(swaps_final, daily_metrics)
 
+        int_swaps_with_fees.to_csv('int_swaps_with_fees.csv')
+        swaps_final.to_csv('swaps_final.csv')
+        daily_metrics.to_csv('daily_metrics.csv')
+        pool_daily_metrics.to_csv('pool_daily_metrics.csv')
+        summary_metrics.to_csv('summary_metrics.csv')
+
         if not skip_bigquery:
             ProgressIndicators.print_step("Uploading aggregated data to BigQuery", "start")
 
             analytics_datasets = [
                 (int_swaps_with_fees, 'intermediate', 'int_swaps_with_fees', 'transactionHash_'),
-                (swaps_final, 'marts', 'swaps_with_metrics', 'transactionHash_'),
-                (daily_metrics, 'marts', 'swap_daily_metrics', 'date'),
-                (pool_daily_metrics, 'marts', 'swap_pool_daily_metrics', 'date')
+                (swaps_final, 'marts', 'm_swaps_with_metrics', 'transactionHash_'),
+                (daily_metrics, 'marts', 'm_swap_daily_metrics', 'date'),
+                (pool_daily_metrics, 'marts', 'm_swap_pool_daily_metrics', 'date')
             ]
 
             for dataset, schema, table_name, id_column in analytics_datasets:

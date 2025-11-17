@@ -1,5 +1,4 @@
 from datetime import date
-import os
 
 from dotenv import load_dotenv
 import pandas as pd
@@ -36,8 +35,8 @@ def fetch_btc_users(users):
 
 @with_progress("Saving to csv")
 def save_to_csv(df, name):
-    os.makedirs('./outputs', exist_ok=True)
-    output_path = f'./outputs/{name}_{date.today()}.csv'
+    # os.makedirs('../outputs', exist_ok=True)
+    output_path = f'../mezo-analytics-1/outputs/{name}_{date.today()}.csv'
     df.to_csv(output_path)
     print(f"Saved CSV to {output_path}")
 

@@ -10,14 +10,15 @@ This script:
 5. Uploads aggregated data to BigQuery marts dataset
 """
 
+from datetime import datetime
+
 from dotenv import load_dotenv
 import pandas as pd
-import os
 import requests
-from datetime import datetime
+
 from mezo.clients import BigQueryClient
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
-from mezo.datetime_utils import format_datetimes
+from mezo.visual_utils import ExceptionHandler, ProgressIndicators, with_progress
+
 
 @with_progress("Fetching transactions from API")
 def fetch_transactions_data(api_url: str) -> dict:
@@ -247,10 +248,10 @@ def main():
         ProgressIndicators.print_step("Summary statistics calculated", "success")
         
         # Display sample data for verification
-        print(f"\n📄 Sample Raw Data (first 3 rows):")
+        print("\n📄 Sample Raw Data (first 3 rows):")
         print(raw_transactions_df[['transaction_hash', 'timestamp', 'amount', 'transaction_type']].head(3))
         
-        print(f"\n📊 Daily Aggregations Summary:")
+        print("\n📊 Daily Aggregations Summary:")
         print(daily_aggregations_df[['date'] + [col for col in daily_aggregations_df.columns if 'total' in col]].head(3))
 
         ProgressIndicators.print_summary_box(
@@ -270,7 +271,7 @@ def main():
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
         ProgressIndicators.print_header("❌ PROCESSING FAILED")
-        print(f"\n📍 Error traceback:")
+        print("\n📍 Error traceback:")
         print(f"{'─' * 50}")
         import traceback
         traceback.print_exc()

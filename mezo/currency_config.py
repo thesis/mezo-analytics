@@ -56,25 +56,20 @@ TOKENS_ID_MAP = {
 }
 
 POOLS_MAP = {
-    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'btc_musd_pool',
-    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'musdc_musd_pool',
-    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'musd_musdt_pool',
-    '0x2a1ab0224a7a608d3a992cb15594a2934f74f4c0': 'musdc_musdt_pool',
-    '0xb07c2172c4b7bbc3ac52088d30cb103853b0b403': 'musdc_btc_pool',
-    '0x329d64572f8922c3fe90d23a3c74a360d8ea6235': 'btc_xsolvbtc_pool',
-    '0x58c8f6d2e589928c46425eaf4254b6a41c45a584': 'upmusd_musd_pool',
-    '0x5cd2a025c001e07ae354a4c22c3009908de1ac59': 'solvbtc_musd_pool',
-    '0x9e60cd4d5b718178fab0137200a36a5472191302': 'btc_musdt_pool',
-    '0xb7fd1db5228e4d9f4109c5635f66375e5af0d8f5': 'musd_xsolvbtc_pool',
-    '0xf6f950485b0a65828f07581ca979ef1271778d6a': 'btc_solvbtc_pool',
-    '0xfbcc89586780ac6f41e9cec97663e5592be41331': 'upmusd_btc_pool',
-    '0x58b18C64F0483D6b742c54C23B625c65F7A0974d': 't_musd_pool'
-}
-
-POOL_TOKEN0_MAP = {
-    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'BTC',
-    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
-    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'MUSD',
+    "0x52e604c44417233b6ccedddc0d640a405caacefb": "btc_musd_pool",
+    "0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356": "musdc_musd_pool",
+    "0x10906a9e9215939561597b4c8e4b98f93c02031a": "musd_musdt_pool",
+    "0x2a1ab0224a7a608d3a992cb15594a2934f74f4c0": "musdc_musdt_pool",
+    "0xb07c2172c4b7bbc3ac52088d30cb103853b0b403": "musdc_btc_pool",
+    "0x329d64572f8922c3fe90d23a3c74a360d8ea6235": "btc_xsolvbtc_pool",
+    "0x58c8f6d2e589928c46425eaf4254b6a41c45a584": "upmusd_musd_pool",
+    "0x5cd2a025c001e07ae354a4c22c3009908de1ac59": "solvbtc_musd_pool",
+    "0x9e60cd4d5b718178fab0137200a36a5472191302": "btc_musdt_pool",
+    "0xb7fd1db5228e4d9f4109c5635f66375e5af0d8f5": "musd_xsolvbtc_pool",
+    "0xf6f950485b0a65828f07581ca979ef1271778d6a": "btc_solvbtc_pool",
+    "0xfbcc89586780ac6f41e9cec97663e5592be41331": "upmusd_btc_pool",
+    "0x6688f868e9c81ee671867e77fbc618bbea2e9782": "t_musd_pool",
+    "0x72e6b3f126cf4f6c90c08114ac29038a0e269210": "cbbtc_btc_pool"
 }
 
 POOL_TOKEN_PAIRS = {
@@ -90,23 +85,24 @@ POOL_TOKEN_PAIRS = {
     '0xb7fd1db5228e4d9f4109c5635f66375e5af0d8f5': {'token0': 'MUSD', 'token1': 'xSolvBTC'},
     '0xf6f950485b0a65828f07581ca979ef1271778d6a': {'token0': 'BTC', 'token1': 'SolvBTC'},
     '0xfbcc89586780ac6f41e9cec97663e5592be41331': {'token0': 'upMUSD', 'token1': 'BTC'},
-    '0x58b18C64F0483D6b742c54C23B625c65F7A0974d': {'token0': 'T', 'token1': 'MUSD'}
+    '0x6688f868e9c81ee671867e77fbc618bbea2e9782': {'token0': 'T', 'token1': 'MUSD'},
+    '0x72e6b3f126cf4f6c90c08114ac29038a0e269210': {'token0': 'cbBTC', 'token1': 'BTC'}
 }
 
 MEZO_TOKEN_ADDRESSES = {
-    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'USDT',
-    '0x52e604c44417233b6ccedddc0d640a405caacefb': 'BTC',
-    '0xa10aD2570ea7b93d19fDae6Bd7189fF4929Bc747': 'SolvBTC',
-    '0xdF708431162Ba247dDaE362D2c919e0fbAfcf9DE': 'xSolvBTC',
-    '0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356': 'USDC',
-    '0x10906a9e9215939561597b4c8e4b98f93c02031a': 'MUSD',
-    '0x221B2D9aD7B994861Af3f4c8A80c86C4aa86Bf53': 'upMUSD',
-    '0xaaC423eDC4E3ee9ef81517e8093d52737165b71F': 'T', 
-    '0x29fA8F46CBB9562b87773c8f50a7F9F27178261c': 'swBTC',
-    '0x1531b6e3d51BF80f634957dF81A990B92dA4b154': 'DAI',
-    '0x812fcC0Bb8C207Fd8D6165a7a1173037F43B2dB8': 'FBTC',
-    '0xdf6542260a9F768f07030E4895083F804241F4C4': 'USDe',
-    '0x6a7CD8E1384d49f502b4A4CE9aC9eb320835c5d7': 'cbBTC'
+    "0x10906a9e9215939561597b4c8e4b98f93c02031a": "USDT",
+    "0x52e604c44417233b6ccedddc0d640a405caacefb": "BTC",
+    "0xa10aD2570ea7b93d19fDae6Bd7189fF4929Bc747": "SolvBTC",
+    "0xdF708431162Ba247dDaE362D2c919e0fbAfcf9DE": "xSolvBTC",
+    "0xed812aec0fecc8fd882ac3eccc43f3aa80a6c356": "USDC",
+    "0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186": "MUSD",
+    "0x221B2D9aD7B994861Af3f4c8A80c86C4aa86Bf53": "upMUSD",
+    "0xaaC423eDC4E3ee9ef81517e8093d52737165b71F": "T",
+    "0x29fA8F46CBB9562b87773c8f50a7F9F27178261c": "swBTC",
+    "0x1531b6e3d51BF80f634957dF81A990B92dA4b154": "DAI",
+    "0x812fcC0Bb8C207Fd8D6165a7a1173037F43B2dB8": "FBTC",
+    "0xdf6542260a9F768f07030E4895083F804241F4C4": "USDe",
+    "0x6a7CD8E1384d49f502b4A4CE9aC9eb320835c5d7": "cbBTC",
 }
 
 TIGRIS_MAP = {
