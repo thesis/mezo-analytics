@@ -6,10 +6,11 @@ This script fetches transaction fees data from the
 MUSD Market smart contracts via the Mezo block explorer API.
 """
 
-import pandas as pd
-import requests
 import time
 from typing import Dict, List, Tuple
+
+import pandas as pd
+import requests
 
 CONTRACTS = {
     "Store": "0xB6881e8b21a3cd6D23c4F90724E26e35BB8980bE",
@@ -204,12 +205,12 @@ def main() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         
         # Add delay between contracts
         if contract_name != list(CONTRACTS.keys())[-1]:
-            print(f"\n⏳ Waiting before fetching next contract...")
+            print("\n⏳ Waiting before fetching next contract...")
             time.sleep(1)
     
     # Create combined DataFrame
     print(f"\n{'='*60}")
-    print(f"📊 COMBINED ANALYSIS")
+    print("📊 COMBINED ANALYSIS")
     print(f"{'='*60}")
     
     if all_transactions:
@@ -230,15 +231,15 @@ def main() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         print(f"🔧 Unique methods across all contracts: {stats['unique_methods']}")
         print(f"💰 Total fees paid: {stats['total_fees_eth']:.8f} ETH")
         
-        print(f"\n📊 Transactions by contract:")
+        print("\n📊 Transactions by contract:")
         for contract, count in stats['transactions_by_contract'].items():
             print(f"  {contract}: {count}")
         
-        print(f"\n📈 Top methods across all contracts:")
+        print("\n📈 Top methods across all contracts:")
         for method, count in list(stats['methods_breakdown'].items())[:10]:
             print(f"  {method}: {count}")
         
-        print(f"\n🔍 Sample transactions from combined dataset:")
+        print("\n🔍 Sample transactions from combined dataset:")
         sample_cols = ['contract_name', 'date', 'method', 'market_item', 'fee_value']
         print(transactions_df[sample_cols].head(10).to_string(index=False))
         
@@ -246,12 +247,12 @@ def main() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         store_df = transactions_df[transactions_df['contract_name'] == 'Store'].copy()
         donations_df = transactions_df[transactions_df['contract_name'] == 'Donations'].copy()
         
-        print(f"\n💡 Individual DataFrames created:")
+        print("\n💡 Individual DataFrames created:")
         print(f"  store_df: {len(store_df)} transactions")
         print(f"  donations_df: {len(donations_df)} transactions")
         print(f"  transactions_df: {len(transactions_df)} transactions (combined)")
         
-        print(f"\n🎉 Multi-contract data collection complete!")
+        print("\n🎉 Multi-contract data collection complete!")
         
         return transactions_df, store_df, donations_df
         

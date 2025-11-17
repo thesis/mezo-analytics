@@ -94,9 +94,9 @@ class SubgraphClient:
     MUSD_STABILITY_POOL_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-stability-pool/1.0.0/gn"
     MUSD_TROVE_MANAGER_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn"
     AUGUST_VAULT_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn"
-    SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
-    POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.1.0/gn"
-    TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
+    SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.2.0/gn"
+    POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.2.0/gn"
+    TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.2.0/gn'
     WORMHOLE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn'
     LOLLI_WIT_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/btc-as-erc20-mezo/1.0.0/gn'
 
@@ -407,6 +407,29 @@ class BigQueryClient:
         )
         
         self.client = bigquery.Client(project=project_id, credentials=credentials)
+
+    def query(self, query_string: str) -> pd.DataFrame:
+        """
+        Execute a SQL query against BigQuery and return results as a pandas DataFrame.
+        
+        Args:
+            query_string: SQL query string to execute
+            
+        Returns:
+            pandas.DataFrame: Query results as a DataFrame
+            
+        Example:
+            >>> client = BigQueryClient(key="BIGQUERY_KEY", project_id="my-project")
+            >>> df = client.query("SELECT * FROM `my-project.my_dataset.my_table` LIMIT 100")
+        """
+        try:
+            query_job = self.client.query(query_string)
+            df = query_job.to_dataframe()
+            print(f"✅ Query executed successfully. Returned {len(df)} rows.")
+            return df
+        except Exception as e:
+            print(f"❌ Error executing query: {e}")
+            raise
 
     def create_dataset(self, dataset_id: str, location: str = "US"):
         dataset_ref = bigquery.Dataset(self.client.dataset(dataset_id))

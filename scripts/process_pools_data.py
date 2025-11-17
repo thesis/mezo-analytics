@@ -460,7 +460,7 @@ def calculate_fee_metrics(fees_df):
     df = fees_df.copy()
     df = df.sort_values(['pool', 'timestamp'])
 
-    df['total_fees_usd'] = df['totalFees0_usd'] + df['totalFees1_usd']
+    df['total_fees_usd'] = df['totalFees0_usd'].fillna(0) + df['totalFees1_usd'].fillna(0)
     
     daily_pool_fees = df.groupby(['pool', 'timestamp']).agg({
         'totalFees0_usd': 'sum',
@@ -597,11 +597,13 @@ def main(test_mode=False, sample_size=False, skip_bigquery=False):
         if test_mode:            
             snapshots = [
                 (tvl_snapshot, 'm_pools_tvl_snapshot'),
-                (efficiency_metrics, 'm_pools_efficiency')
+                (efficiency_metrics, 'm_pools_efficiency'),
+                (daily_pool_fees, 'm_pools_daily_fees_by_pool'),
+                (daily_pool_fees_all, 'm_pools_daily_fees')
             ]
 
             for dataset, name in snapshots:
-                dataset.to_csv(f'{name}.csv')
+                dataset.to_csv(f"/Users/laurenjackson/Desktop/mezo-analytics-1/outputs/{name}.csv")
 
             print(tvl_snapshot)
             print(daily_pool_tvl[daily_pool_tvl['date'] >=  current_date - timedelta(days=7)])
@@ -745,3 +747,4 @@ if __name__ == "__main__":
     # results = tests.quick_test(sample_size=500)
     # test.inspect_data(results)
     # tests.save_test_outputs(results)
+
