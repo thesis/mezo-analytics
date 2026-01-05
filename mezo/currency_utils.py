@@ -1,8 +1,17 @@
 from decimal import Decimal
 import os
-import requests
-from mezo.currency_config import TOKENS_ID, MEZO_ASSET_NAMES_MAP, TOKENS_ID_MAP, POOL_TOKEN_PAIRS, TOKEN_MAP
+
 import pandas as pd
+import requests
+
+from mezo.currency_config import (
+    MEZO_ASSET_NAMES_MAP,
+    POOL_TOKEN_PAIRS,
+    TOKEN_MAP,
+    TOKENS_ID,
+    TOKENS_ID_MAP,
+)
+
 
 class Conversions:
 
@@ -38,7 +47,7 @@ class Conversions:
 
         return df
     
-    def add_usd_rate_column(self, df, token_column, rate_column_name='usd_rate'):
+    def _add_usd_rate_column(self, df: pd.DataFrame, token_column: str, rate_column_name: str = 'usd_rate') -> pd.DataFrame:
         """
         Add a USD rate column for a given token column
 
@@ -140,7 +149,7 @@ class Conversions:
             token_column: Name of column containing token identifiers
             amount_columns: List of amount columns to convert
         """
-        df_result = self.add_usd_rate_column(df, token_column, 'usd_rate')
+        df_result = self._add_usd_rate_column(df, token_column, 'usd_rate')
         
         for col in amount_columns:
             if col in df_result.columns:
@@ -170,7 +179,7 @@ class Conversions:
         for config in token_configs:
             token_col = config['token_col']
             rate_col = f"{token_col}_usd_rate"
-            df_result = self.add_usd_rate_column(df_result, token_col, rate_col)
+            df_result = self._add_usd_rate_column(df_result, token_col, rate_col)
         
         # Convert amount columns to USD
         for config in token_configs:
@@ -184,13 +193,17 @@ class Conversions:
         
         return df_result
 
-    def replace_token_addresses_with_symbols(self, df, token_column='token'):
+    def replace_token_addresses_with_symbols(self, df, token_column, token_map):
         """
-        Replaces token addresses with token symbols using the TOKEN_MAP dict in currency_config.
+        Replaces token addresses with token symbols using a token map dict in currency_config.
+        Args:
+            df: DataFrame containing token data
+            token_column: Name of column containing token addresses
+            token_map: Dict mapping token addresses to symbols. TOKEN_MAP for Ethereum, MEZO_TOKEN_ADDRESSES for Mezo
         """
-        df[token_column] = df[token_column].str.lower()  # CHANGED FROM HARDCODED 'token'
-        normalized_map = {k.lower(): v for k, v in TOKEN_MAP.items()}
-        df[token_column] = df[token_column].replace(normalized_map)  # CHANGED FROM HARDCODED 'token'
+        df[token_column] = df[token_column].str.lower()
+        normalized_map = {k.lower(): v for k, v in token_map.items()}
+        df[token_column] = df[token_column].replace(normalized_map)
 
         return df
     
