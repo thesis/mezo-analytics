@@ -1,17 +1,17 @@
-import requests
-import time
+from datetime import datetime
+import json
 import os
-import pandas as pd
-import numpy as np
-from supabase import create_client, Client
+import time
+from typing import Dict, List, Optional
+
+from dotenv import load_dotenv
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
-from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
+import requests
+from supabase import Client, create_client
 from web3 import Web3
-import json
-from typing import List, Dict, Optional
-from datetime import datetime
-
 
 load_dotenv(dotenv_path='../.env', override=True)
 
@@ -65,11 +65,11 @@ class SubgraphClient:
         Returns:
             pandas.DataFrame: The fetched data as a DataFrame, or None if no data
         """
-        musd = SubgraphClient(url=subgraph_url, headers=SubgraphClient.SUBGRAPH_HEADERS)
+        subgraph = SubgraphClient(url=subgraph_url, headers=SubgraphClient.SUBGRAPH_HEADERS)
         
         print(f"🔍 Trying {query_key} query...")
         try:
-            data = musd.fetch_subgraph_data(query, query_key)
+            data = subgraph.fetch_subgraph_data(query, query_key)
             if data:
                 df = pd.DataFrame(data)
                 print(f"✅ Found {len(df)} {query_key} records")
@@ -84,21 +84,33 @@ class SubgraphClient:
     SUBGRAPH_HEADERS = {
         "Content-Type": "application/json",
     }
+    PREFIX = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs"
+
+    MEZO_PORTAL_SUBGRAPH = f'{PREFIX}/mezo-portal-mainnet/1.0.0/gn'
     
-    MEZO_PORTAL_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-portal-mainnet/1.0.0/gn'
-    MUSD_MARKET_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/market-mezo/1.0.0/gn'
-    MEZO_BRIDGE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-bridge-mainnet/1.0.0/gn'
-    MEZO_BRIDGE_OUT_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/bridge-out-mezo/1.0.0/gn'
-    BORROWER_OPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/borrower-operations-mezo/1.0.0/gn"
-    MUSD_TOKEN_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-token/1.0.0/gn"
-    MUSD_STABILITY_POOL_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-stability-pool/1.0.0/gn"
-    MUSD_TROVE_MANAGER_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-trove-manager/1.0.0/gn"
-    AUGUST_VAULT_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/mezo-vaults-mezo/1.0.0/gn"
-    SWAPS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.0.0/gn"
-    POOLS_SUBGRAPH = "https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/musd-pools-mezo/1.1.0/gn"
-    TIGRIS_POOLS_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/tigris-pools-mezo/1.0.0/gn'
-    WORMHOLE_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/wormhole-bridge-mezo/1.0.0/gn'
-    LOLLI_WIT_SUBGRAPH = 'https://api.goldsky.com/api/public/project_cm6ks2x8um4aj01uj8nwg1f6r/subgraphs/btc-as-erc20-mezo/1.0.0/gn'
+    MUSD_MARKET_SUBGRAPH = f'{PREFIX}/market-mezo/1.0.0/gn'
+    
+    MEZO_BRIDGE_SUBGRAPH = f'{PREFIX}/mezo-bridge-mainnet/1.0.0/gn'
+    MEZO_BRIDGE_OUT_SUBGRAPH = f'{PREFIX}/bridge-out-mezo/1.0.0/gn'
+    BORROWER_OPS_SUBGRAPH = f'{PREFIX}/borrower-operations-mezo/1.0.0/gn'
+    
+    MUSD_TOKEN_SUBGRAPH = f'{PREFIX}/musd-token/1.0.0/gn'
+    MUSD_STABILITY_POOL_SUBGRAPH = f'{PREFIX}/musd-stability-pool/1.0.0/gn'
+    MUSD_TROVE_MANAGER_SUBGRAPH = f'{PREFIX}/musd-trove-manager/1.0.0/gn'
+    
+    AUGUST_VAULT_SUBGRAPH = f'{PREFIX}/mezo-vaults-mezo/1.0.0/gn'
+    
+    SWAPS_SUBGRAPH = f'{PREFIX}/musd-pools-mezo/1.0.0/gn'
+    POOLS_SUBGRAPH = f'{PREFIX}/musd-pools-mezo/1.1.0/gn'
+    TIGRIS_POOLS_SUBGRAPH = f'{PREFIX}/tigris-pools-mezo/1.3.0/gn'
+    
+    WORMHOLE_SUBGRAPH = f'{PREFIX}/wormhole-bridge-mezo/1.0.0/gn'
+    
+    LOLLI_WIT_SUBGRAPH = f'{PREFIX}/btc-as-erc20-mezo/1.0.0/gn'
+    
+    VOTING_ESCROW_TESTNET_URL = f'{PREFIX}/voting-escrow-testnet/1.1.0/gn'
+    VOTING_ESCROW_MAINNET_SUBGRAPH = f'{PREFIX}/voting-escrow-mainnet/1.2.0/gn'
+
 
 class SupabaseClient:
 
@@ -390,6 +402,7 @@ class BigQueryClient:
         
         # Load and set credentials
         import json
+
         from google.oauth2 import service_account
         
         credentials_json = os.getenv(key)
