@@ -1,5 +1,7 @@
-import pandas as pd
 from datetime import datetime
+
+import pandas as pd
+
 
 def add_cumulative_columns(df, cols):
     # First, add the cumulative columns
@@ -83,7 +85,8 @@ def flatten_json_column(df, json_col, prefix=None):
     # Add all flattened columns with prefix
     for col in json_normalized.columns:
         # Replace dots with underscores for cleaner column names
-        clean_col_name = col.replace('.', '_')
+        # Convert to string first in case column names are integers
+        clean_col_name = str(col).replace('.', '_')
         new_col_name = f"{prefix}{clean_col_name}"
         result_df[new_col_name] = json_normalized[col]
     

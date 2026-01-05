@@ -42,7 +42,7 @@ class PoolQueries:
     poolVolumes(
       interval: day
       first: 1000
-      orderBy: timestamp_ 
+      orderBy: timestamp 
       orderDirection: desc
       skip: $skip
     ) {
@@ -463,3 +463,42 @@ class VaultQueries:
     }
   }
   """
+
+class VotingEscrowQueries:
+  GET_VOTE_STAKERS = """
+  query getVoteStakers($skip: Int!) {
+    stakers(
+      first: 1000
+      orderBy: timestamp_
+      orderDirection: desc
+      skip: $skip
+    ) {
+  }
+  """
+
+  GET_VOTE_STAKES = """
+  query getStakes($skip: Int!) {
+    stakes(
+      first: 1000, 
+      orderBy: initializedAt, 
+      orderDirection: desc, 
+      skip: $skip
+    ) {
+        id
+            staker {
+          id
+        }
+        initializedAt
+        amount
+        token
+        selectedLockDuration
+        lockDuration
+        isPermanent
+        unlockAt
+        totalEarned
+        isWithdrawn
+        withdrawnAt
+        withdrawnAmount
+      }
+    }
+    """
