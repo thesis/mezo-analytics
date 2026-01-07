@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from mezo.clients import BigQueryClient, SubgraphClient
-from mezo.currency_config import TOKEN_TYPE_MAP
+from mezo.currency_config import TOKEN_MAP, TOKEN_TYPE_MAP
 
 # from mezo.test_utils import tests
 from mezo.currency_utils import Conversions
@@ -33,7 +33,7 @@ def clean_bridge_data(raw, sort_col, date_cols, currency_cols, asset_col, txn_ty
         raise ValueError("Invalid input data for cleaning")
     
     df = raw.copy().sort_values(by=sort_col)
-    df = conversions.replace_token_addresses_with_symbols(df=df)
+    df = conversions.replace_token_addresses_with_symbols(df=df, token_column='token', token_map=TOKEN_MAP)
     df = format_datetimes(df, date_cols)
     df = conversions.format_token_decimals(df, currency_cols, asset_col)
     # format(df, currency_cols, asset_col)
