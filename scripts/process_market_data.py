@@ -1,31 +1,34 @@
 from dotenv import load_dotenv
 import pandas as pd
-from mezo.clients import BigQueryClient, SubgraphClient
-from mezo.datetime_utils import format_datetimes
-from mezo.currency_utils import Conversions
-from mezo.visual_utils import ProgressIndicators, ExceptionHandler, with_progress
-from mezo.currency_config import MUSD_MARKET_MAP
-from mezo.queries import MUSDQueries
 
+from mezo.clients import BigQueryClient, SubgraphClient, SupabaseClient
+from mezo.currency_config import MUSD_MARKET_MAP
+from mezo.currency_utils import Conversions
+from mezo.datetime_utils import format_datetimes
+from mezo.queries import MUSDQueries
+from mezo.visual_utils import ProgressIndicators, with_progress
+
+
+@with_progress("Replacing product IDs with human-readable names")
 def replace_market_items(df, col, musd_market_map):
     """
     Replaces values in the specified column using the musd_market_map dictionary.
 
     Parameters:
-        df: The DataFrame containing the column to replace.
-        col: The column name to replace values in.
-        musd_market_map (dict): Dictionary mapping addresses/IDs to human-readable labels.
+        df: The DataFrame containing the column to replace
+        col: The column name to replace values in
+        musd_market_map (dict): Dictionary mapping addresses/IDs to human-readable labels
 
     Returns:
         pd.DataFrame: Updated DataFrame with replaced values.
     """
-    # Normalize the column to lowercase for matching
+    # normalizes the column to lowercase for matching
     df[col] = df[col].str.lower()
 
-    # Normalize the map keys to lowercase
+    # normalizes the map keys to lowercase
     normalized_map = {k.lower(): v for k, v in musd_market_map.items()}
 
-    df[col] = df[col].replace(normalized_map)
+    df[col] = df[col].map(normalized_map)
     
     return df
 
@@ -55,14 +58,15 @@ def process_donations_data(donations):
 def process_purchases_data(purchases):
     conversions = Conversions()
     """Process and format purchases data"""
-    # Replace product IDs with human-readable names
+    
+    # replaces product IDs with human-readable names
     purchases_formatted = replace_market_items(purchases, 'productId', MUSD_MARKET_MAP)
     
-    # Format dates and currency amounts
+    # formats dates and currency amounts
     format_datetimes(purchases_formatted, ['timestamp_'])
     purchases_formatted = conversions.format_token_decimals(purchases_formatted, amount_cols=['price'])
-    # format_musd_currency_columns(purchases_formatted, ['price'])
     
+    # renames columns for consistency
     purchases_col_map = {
         'timestamp_': 'date', 
         'productId': 'item',
@@ -90,79 +94,106 @@ def create_market_transactions(donations_formatted, purchases_formatted):
     
     return market_transactions_final
 
+@with_progress("Fetching redemption codes from Supabase")
+def fetch_redemption_codes(supabase):
+    redemption_codes = supabase.fetch_table_data("store_redemption_codes")
+    return redemption_codes
 
-def main():
+@with_progress("Fetching market transactions data")
+def get_all_market_txns(subgraph_url, query, query_key):
+    df = SubgraphClient.get_subgraph_data(subgraph_url, query, query_key)
+    
+    return df
+
+@with_progress("Uploading data to BigQuery")
+def upload_to_bigquery(bq, df, dataset_name, table_name, id_column):
+    if df is not None and len(df) > 0:
+        bq.update_table(df, dataset_name, table_name, id_column)
+        ProgressIndicators.print_step(f"Uploaded {dataset_name} to BigQuery", "success")
+    return df
+
+def main(test_mode=False, skip_bigquery=False):
     """Main function to process market transaction data."""
     ProgressIndicators.print_header("MARKET DATA PROCESSING PIPELINE")
     
+    if test_mode:
+        print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
+        if skip_bigquery:
+            print(f"{'Skipping BigQuery uploads':^60}")
+        print(f"{'─' * 60}\n")
+    
     try:
-        # Load environment variables
+        # ==========================================================
+        # LOAD ENVIRONMENT VARIABLES
+        # ==========================================================
+        
         ProgressIndicators.print_step("Loading environment variables", "start")
+        
         load_dotenv(dotenv_path='../.env', override=True)
         pd.options.display.float_format = '{:.5f}'.format
-        ProgressIndicators.print_step("Environment loaded successfully", "success")
+
+        supabase = SupabaseClient(url="SUPABASE_URL_PROD", key="SUPABASE_KEY_PROD")
         
-        # Get raw market data
-        ProgressIndicators.print_step("Fetching market donations data", "start")
-        # donations = get_all_market_donations()
-        donations = SubgraphClient.get_subgraph_data(
+        if not skip_bigquery:
+            bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
+        
+        ProgressIndicators.print_step("Environment loaded successfully", "success")
+
+        # ==========================================================
+        # FETCH RAW DATA
+        # ==========================================================
+
+        # fetches the store_redemption_codes table from supabase
+        redemption_codes = fetch_redemption_codes(supabase)
+        
+        # fetches donations and purchases from market-mezo subgraph (1.0.0)
+        donations = get_all_market_txns(
             SubgraphClient.MUSD_MARKET_SUBGRAPH, 
-            MUSDQueries.GET_MARKET_DONATIONS,
+            MUSDQueries.GET_MARKET_DONATIONS, 
             'donateds'
         )
         
-        ProgressIndicators.print_step("Fetching market purchases data", "start")
-        # purchases = get_all_market_purchases()
-        purchases = SubgraphClient.get_subgraph_data(
+        purchases = get_all_market_txns(
             SubgraphClient.MUSD_MARKET_SUBGRAPH, 
-            MUSDQueries.GET_MARKET_PURCHASES,
+            MUSDQueries.GET_MARKET_PURCHASES, 
             'orderPlaceds'
         )
         
-        # Upload raw data to BigQuery
-        bq = BigQueryClient(key='GOOGLE_CLOUD_KEY', project_id='mezo-portal-data')
-
-        ProgressIndicators.print_step("Uploading raw market data to BigQuery", "start")
-        if donations is not None and len(donations) > 0:
-            bq.update_table(donations, 'raw_data', 'market_donations_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw donations to BigQuery", "success")
-            
-        if purchases is not None and len(purchases) > 0:
-            bq.update_table(purchases, 'raw_data', 'market_purchases_raw', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded raw purchases to BigQuery", "success")
-        
-        # Validate raw data
-        if not ExceptionHandler.validate_dataframe(
-            donations, "Market donations", 
-            ['timestamp_', 'recipient', 'amount', 'donor']
-        ):
-            raise ValueError("Invalid donations data structure")
-            
-        if not ExceptionHandler.validate_dataframe(
-            purchases, "Market purchases", 
-            ['timestamp_', 'productId', 'price', 'customer']
-        ):
-            raise ValueError("Invalid purchases data structure")
-        
         ProgressIndicators.print_step(f"Loaded {len(donations)} donations and {len(purchases)} purchases", "success")
         
-        # Process the data
+        # ==========================================================
+        # CLEAN DATA
+        # ==========================================================
+        
         donations_processed = process_donations_data(donations)
         purchases_processed = process_purchases_data(purchases)
         
-        # Create unified market transactions
+        # joins donations and purchases into one dataframe
         market_transactions_final = create_market_transactions(donations_processed, purchases_processed)
 
-        ProgressIndicators.print_step("Uploading cleaned market data to BigQuery", "start")
-        if market_transactions_final is not None and len(market_transactions_final) > 0:
-            # Use transaction hash as unique ID for deduplication (now the default)
-            bq.update_table(market_transactions_final, 'staging', 'market_transactions_clean', 'transactionHash_')
-            ProgressIndicators.print_step("Uploaded cleaned market data to BigQuery", "success")
+        # ==========================================================
+        # UPLOAD ALL DATA TO BIGQUERY
+        # ==========================================================
+
+        if not skip_bigquery:
+            datasets_to_upload = [
+                (donations, "raw_data", "market_donations_raw", "transactionHash_"),
+                (purchases, "raw_data", "market_purchases_raw", "transactionHash_"),
+                (redemption_codes, "supabase", "dim_market_redemption_codes", "code"),
+                (market_transactions_final, "staging", "market_transactions_clean", "transactionHash_")
+            ]
+
+            for df, dataset_name, table_name, id_column in datasets_to_upload:
+                upload_to_bigquery(bq, df, dataset_name, table_name, id_column)
         
-        # Display summary statistics
+        # ==========================================================
+        # DISPLAY SUMMARY STATISTICS
+        # ==========================================================
+    
         ProgressIndicators.print_summary_box(
             f"{ProgressIndicators.COIN} MARKET TRANSACTION SUMMARY {ProgressIndicators.COIN}",
             {
+                "Unique items": ", ".join(str(x) for x in market_transactions_final['item'].unique()),
                 "Total Transactions": len(market_transactions_final),
                 "Total Amount": f'${market_transactions_final['amount'].sum(): ,.2f}',
                 "Unique Items": market_transactions_final['item'].nunique(),
