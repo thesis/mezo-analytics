@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 import os
 
 from dotenv import load_dotenv
@@ -161,7 +161,7 @@ def send_discord_summary(stg, webhook_url):
 # MAIN
 # ==================================================
 
-def main(test_mode=False, skip_bigquery=False):
+def main(test_mode=False, skip_bigquery=False, send_discord=False):
 
     ProgressIndicators.print_header("📌 TOKEN REGISTRATION PROCESSING PIPELINE")
     
@@ -216,9 +216,16 @@ def main(test_mode=False, skip_bigquery=False):
 
         print_summary(stg_data)
         
-        # Send summary to Discord
-        webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
-        send_discord_summary(stg_data, webhook_url)
+        # Send summary to Discord only at 11:59pm UTC daily
+        # Check if send_discord flag is True OR if current time is 23:59 UTC
+        current_utc = datetime.now(timezone.utc)
+        is_daily_summary_time = (current_utc.hour == 23 and current_utc.minute == 59) or send_discord
+        
+        if is_daily_summary_time:
+            webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
+            send_discord_summary(stg_data, webhook_url)
+        else:
+            ProgressIndicators.print_step(f"Skipping Discord summary (only sent at 11:59pm UTC, current time: {current_utc.strftime('%H:%M:%S')} UTC)", "info")
 
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
