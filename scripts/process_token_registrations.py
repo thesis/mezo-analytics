@@ -1,4 +1,4 @@
-from datetime import date, timedelta, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 
 from dotenv import load_dotenv
@@ -95,6 +95,8 @@ def send_discord_summary(stg, webhook_url):
         webhook_url: Discord webhook URL
     """
     try:
+        print("\n🔔 Attempting to send Discord summary...")
+        
         df_all = stg.copy()
         df_today = stg[stg["updated_at"].astype(str) == date.today().strftime("%Y-%m-%d")]
         df_7d = stg[stg["updated_at"].astype(str) >= (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")]
@@ -109,7 +111,8 @@ def send_discord_summary(stg, webhook_url):
         def format_number(num):
             return f"{num:,}"
         
-        # Create Discord embed
+        # Create Discord embed with proper ISO 8601 timestamp
+        current_time = datetime.now(timezone.utc)
         embed = {
             "title": "📌 Token Registration Summary",
             "description": f"Daily update for {date.today().strftime('%B %d, %Y')}",
@@ -141,27 +144,46 @@ def send_discord_summary(stg, webhook_url):
                     "inline": True
                 }
             ],
-            "timestamp": date.today().isoformat()
+            "timestamp": current_time.isoformat()
         }
         
         payload = {
             "embeds": [embed]
         }
         
-        response = requests.post(webhook_url, json=payload)
+        print("📤 Sending payload to Discord webhook...")
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        
+        print(f"📥 Response status: {response.status_code}")
+        print(f"📥 Response text: {response.text[:200]}")
+        
         response.raise_for_status()
         
         ProgressIndicators.print_step("Summary sent to Discord successfully", "success")
+        print("✅ Discord webhook sent successfully!\n")
         
+    except requests.exceptions.RequestException as e:
+        error_msg = f"HTTP error sending Discord summary: {str(e)}"
+        if hasattr(e, 'response') and e.response is not None:
+            error_msg += f"\nResponse status: {e.response.status_code}"
+            error_msg += f"\nResponse text: {e.response.text[:500]}"
+        ProgressIndicators.print_step(error_msg, "error")
+        print(f"❌ Discord webhook failed: {error_msg}\n")
+        # Don't raise - allow script to continue even if Discord fails
     except Exception as e:
-        ProgressIndicators.print_step(f"Failed to send Discord summary: {str(e)}", "error")
+        import traceback
+        error_msg = f"Unexpected error sending Discord summary: {str(e)}"
+        ProgressIndicators.print_step(error_msg, "error")
+        print("❌ Discord webhook failed with unexpected error:")
+        print(f"   {error_msg}")
+        print(f"   Traceback: {traceback.format_exc()}\n")
         # Don't raise - allow script to continue even if Discord fails
 
 # ==================================================
 # MAIN
 # ==================================================
 
-def main(test_mode=False, skip_bigquery=False, send_discord=False):
+def main(test_mode=False, skip_bigquery=False):
 
     ProgressIndicators.print_header("📌 TOKEN REGISTRATION PROCESSING PIPELINE")
     
@@ -216,16 +238,9 @@ def main(test_mode=False, skip_bigquery=False, send_discord=False):
 
         print_summary(stg_data)
         
-        # Send summary to Discord only at 11:59pm UTC daily
-        # Check if send_discord flag is True OR if current time is 23:59 UTC
-        current_utc = datetime.now(timezone.utc)
-        is_daily_summary_time = (current_utc.hour == 23 and current_utc.minute == 59) or send_discord
-        
-        if is_daily_summary_time:
-            webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
-            send_discord_summary(stg_data, webhook_url)
-        else:
-            ProgressIndicators.print_step(f"Skipping Discord summary (only sent at 11:59pm UTC, current time: {current_utc.strftime('%H:%M:%S')} UTC)", "info")
+        # Send summary to Discord
+        webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
+        send_discord_summary(stg_data, webhook_url)
 
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
