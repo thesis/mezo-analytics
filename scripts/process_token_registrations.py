@@ -18,6 +18,12 @@ def fetch_token_registrations(supabase):
 
     return raw
 
+@with_progress("Fetching user mats data from accounts_metadata table in Supabase")
+def fetch_mats_data(mats_supabase):
+    raw = mats_supabase.fetch_table_data("accounts_metadata")
+
+    return raw
+
 @with_progress("Cleaning raw token registrations data")
 def clean_token_registrations(raw):
     stg = raw.sort_values(by='updated_at', ascending=False)
@@ -82,6 +88,8 @@ def print_summary(stg):
     print(f"Total registrations:            {df_all['address'].count():,}")
     print(f"Total liquid registrations:     {df_all[df_all['token_preference'] == 'liquid']['address'].count():,}")
     print(f"Total locked registrations:     {df_all[df_all['token_preference'] == 'locked']['address'].count():,}")
+    print(f"Percentage of liquid registrations: {df_all[df_all['token_preference'] == 'liquid']['address'].count() / df_all['address'].count():.2%}")
+    print(f"Percentage of locked registrations: {df_all[df_all['token_preference'] == 'locked']['address'].count() / df_all['address'].count():.2%}")
     
     print(f"{'─' * 60}\n")
 
@@ -188,6 +196,7 @@ def main(test_mode=False, skip_bigquery=False):
     ProgressIndicators.print_header("📌 TOKEN REGISTRATION PROCESSING PIPELINE")
     
     supabase = SupabaseClient(url="SUPABASE_URL_PROD", key="SUPABASE_KEY_PROD")
+    mats_supabase = SupabaseClient(url="SUPABASE_URL_MATS", key="SUPABASE_KEY_MATS")
 
     if test_mode:
         print(f"\n{'🧪 TEST MODE ENABLED 🧪':^60}")
@@ -206,13 +215,18 @@ def main(test_mode=False, skip_bigquery=False):
         if not test_mode:
             raw_data = fetch_token_registrations(supabase)
             save_to_csv(raw_data, 'raw_token_registrations')
+
+            raw_mats_data = fetch_mats_data(mats_supabase)
+            save_to_csv(raw_mats_data, 'raw_mats_data')
         
         else:
-            raw_data = pd.read_csv('raw_token_registrations.csv')
+            raw_data = pd.read_csv(f'outputs/raw_token_registrations_{date.today()}.csv')
+            raw_mats_data = pd.read_csv(f'outputs/raw_mats_data_{date.today()}.csv')
 
         if not skip_bigquery:
             raw_datasets = [
-                (raw_data, 'raw_data', 'token_registrations_raw', 'id')
+                (raw_data, 'raw_data', 'token_registrations_raw', 'id'),
+                (raw_mats_data, 'raw_data', 'mats_data_raw', 'id')
             ]
 
             for df, database, table_name, id_column in raw_datasets:
