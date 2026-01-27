@@ -25,7 +25,13 @@ def convert_unix_to_datetime(df, columns):
 def format_datetimes(df, date_columns):
     df[date_columns] = df[date_columns].astype(float)
     df = convert_unix_to_datetime(df, date_columns)
-    df[date_columns] = df[date_columns].apply(lambda col: pd.to_datetime(col).dt.date)
+    
+    # Convert to date, handling mixed tz-aware/tz-naive values
+    for col in date_columns:
+        # Convert to datetime, coercing errors, then normalize timezone
+        dt_series = pd.to_datetime(df[col], errors='coerce', utc=True)
+        # Extract date (returns tz-naive date objects)
+        df[col] = dt_series.dt.date
     
     return df
 
