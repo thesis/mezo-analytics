@@ -28,9 +28,9 @@ def fetch_mats_data(mats_supabase):
 def clean_token_registrations(raw):
     stg = raw.sort_values(by='updated_at', ascending=False)
 
-    stg['updated_at'] = pd.to_datetime(stg['updated_at']).dt.date
-    stg['created_at'] = pd.to_datetime(stg['created_at']).dt.date
-    stg['terms_accepted_at'] = pd.to_datetime(stg['terms_accepted_at']).dt.date
+    stg['updated_at'] = pd.to_datetime(stg['updated_at'], format='ISO8601').dt.date
+    stg['created_at'] = pd.to_datetime(stg['created_at'], format='ISO8601').dt.date
+    stg['terms_accepted_at'] = pd.to_datetime(stg['terms_accepted_at'], format='ISO8601').dt.date
 
     return stg
 
@@ -118,12 +118,14 @@ def send_discord_summary(stg, webhook_url):
         # Format numbers with commas
         def format_number(num):
             return f"{num:,}"
+        def format_percentage(num):
+            return f"{round(num, 2)*100}%"
         
         # Create Discord embed with proper ISO 8601 timestamp
         current_time = datetime.now(timezone.utc)
         embed = {
             "title": "📌 Token Registration Summary",
-            "description": f"Daily update for {date.today().strftime('%B %d, %Y')}",
+            "description": f"Daily update for {date.today().strftime('%B %d, %Y - %H:%M UTC')}",
             "color": 3447003,  # Blue color
             "fields": [
                 {
@@ -150,7 +152,17 @@ def send_discord_summary(stg, webhook_url):
                     "name": "🔒 Locked",
                     "value": format_number(total_locked),
                     "inline": True
-                }
+                },
+                {
+                    "name": "💧 Percent Liquid",
+                    "value": format_percentage(total_liquid / total_all),
+                    "inline": True
+                },
+                {
+                    "name": "🔒 Percent Locked",
+                    "value": format_percentage(total_locked / total_all),
+                    "inline": True
+                },
             ],
             "timestamp": current_time.isoformat()
         }
@@ -253,8 +265,8 @@ def main(test_mode=False, skip_bigquery=False):
         print_summary(stg_data)
         
         # Send summary to Discord
-        webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
-        send_discord_summary(stg_data, webhook_url)
+        # webhook_url = "https://discord.com/api/webhooks/1458514561140523060/SNwJBsyXIiy5Jer-jAV2xruYQGObz4JHC2dzwvIozVM7BK1F1C31ca4eciEkp0vklEI5"
+        # send_discord_summary(stg_data, webhook_url)
 
     except Exception as e:
         ProgressIndicators.print_step(f"Critical error in main processing: {str(e)}", "error")
